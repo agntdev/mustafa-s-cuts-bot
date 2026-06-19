@@ -1,10 +1,12 @@
 import { createRequire } from "node:module";
+import { getPool } from "./db.js";
 
 // Domain types — the shape of records the bot reads and writes. Kept in one
 // place so E3T1 (Postgres schema) and E3T2 (seeding) can target the same
-// structure the handlers already consume. No DB code lives here yet: E1T1
-// reads through `getServices()` / `getServiceById()`, and E3T1 swaps the
-// implementation under those exports without touching the call sites.
+// structure the handlers already consume. The bot reads through
+// `getServices()` / `getServiceById()` / `getBarbers()` / `getBarberById()`,
+// and the implementation under those exports picks the data source
+// transparently (Postgres → Redis → in-code defaults).
 
 export interface Service {
   /** Stable id used in callback_data (e.g. "haircut"). */
@@ -28,9 +30,9 @@ export interface Barber {
   work_hours_override: Record<string, string> | null;
 }
 
-/** Default catalog from docs/spec.md (the spec's stated service durations).
- *  Prices are intentionally null — the owner sets them in the admin flow
- *  (E2T1+). E3T2 will seed the same records into Postgres with real prices. */
+/** Fallback catalogs used when no Postgres / Redis is configured (dev, test,
+ *  harness). These match the rows E3T2 seeds into Postgres and the spec's
+ *  documented defaults. */
 export const DEFAULT_SERVICES: ReadonlyArray<Service> = [
   { id: "haircut",      name: "Haircut",           price_cents: null, duration_minutes: 30 },
   { id: "beard_trim",   name: "Beard trim",        price_cents: null, duration_minutes: 15 },
@@ -39,29 +41,23 @@ export const DEFAULT_SERVICES: ReadonlyArray<Service> = [
   { id: "hot_towel",    name: "Hot towel shave",   price_cents: null, duration_minutes: 40 },
 ];
 
-/** Default barbers from docs/spec.md. "any" is a virtual id meaning "first
- *  available barber" — the booking flow resolves it at confirmation time. */
 export const DEFAULT_BARBERS: ReadonlyArray<Barber> = [
-  { id: "mustafa", name: "Mustafa", work_hours_override: null },
-  { id: "alex",    name: "Alex",    work_hours_override: null },
+  { id: "mustafa", name: "Mustafa",    work_hours_override: null },
+  { id: "alex",    name: "Alex",       work_hours_override: null },
+  // "any" is a virtual id meaning "first available barber" — always
+  // synthesised by getBarbers() so the picker always shows it.
   { id: "any",     name: "Any barber", work_hours_override: null },
 ];
 
-/**
- * The minimal ioredis surface our data layer needs. Mirrors the
- * `RedisLike` shape in `src/toolkit/session/redis.ts` so the same lazy
- * import trick keeps ioredis out of the bundle when REDIS_URL is unset.
- */
+/** Minimal ioredis surface our Redis fallback needs. */
 interface RedisLike {
   get(key: string): Promise<string | null>;
   set(key: string, value: string): Promise<unknown>;
 }
 
-/** Single namespace keys for the catalogs. */
 const SERVICES_KEY = "mcuts:services";
 const BARBERS_KEY = "mcuts:barbers";
 
-/** Lazily-loaded ioredis singleton, or undefined when REDIS_URL is unset. */
 let redisClient: RedisLike | undefined;
 function getRedis(): RedisLike | undefined {
   if (redisClient) return redisClient;
@@ -77,11 +73,75 @@ function getRedis(): RedisLike | undefined {
     }) as RedisLike;
     return redisClient;
   } catch (err) {
-    // ioredis not installed in this build — fall through to the default
-    // catalog. The bot still functions in dev; production deploys must
-    // install ioredis (it's already a dependency for the toolkit's session
-    // storage).
     console.error("[mustafa-cuts] could not load ioredis:", err);
+    return undefined;
+  }
+}
+
+interface ServiceRow {
+  id: string;
+  name: string;
+  price_cents: number | null;
+  duration_minutes: number;
+}
+interface BarberRow {
+  id: string;
+  name: string;
+  work_hours_override: Record<string, string> | null;
+}
+
+function parseMaybeJson<T>(v: unknown): T | null {
+  if (v == null) return null;
+  if (typeof v === "string") {
+    try { return JSON.parse(v) as T; } catch { return null; }
+  }
+  return v as T;
+}
+
+function rowToService(row: ServiceRow): Service {
+  return {
+    id: row.id,
+    name: row.name,
+    price_cents: row.price_cents,
+    duration_minutes: row.duration_minutes,
+  };
+}
+function rowToBarber(row: BarberRow): Barber {
+  return {
+    id: row.id,
+    name: row.name,
+    work_hours_override: parseMaybeJson<Record<string, string>>(row.work_hours_override),
+  };
+}
+
+async function readServicesFromPostgres(): Promise<Service[] | undefined> {
+  const pool = getPool();
+  if (!pool) return undefined;
+  try {
+    const { rows } = await pool.query(
+      "SELECT id, name, price_cents, duration_minutes FROM services ORDER BY id",
+    );
+    const services = (rows as ReadonlyArray<ServiceRow>).map(rowToService);
+    return services;
+  } catch (err) {
+    console.error("[mustafa-cuts] could not read services from postgres:", err);
+    return undefined;
+  }
+}
+
+async function readBarbersFromPostgres(): Promise<Barber[] | undefined> {
+  const pool = getPool();
+  if (!pool) return undefined;
+  try {
+    const { rows } = await pool.query(
+      "SELECT id, name, work_hours_override FROM barbers ORDER BY id",
+    );
+    const realBarbers = (rows as ReadonlyArray<BarberRow>).map(rowToBarber);
+    // Always append the virtual "any" option so the client picker shows it
+    // regardless of what the owner has configured.
+    return [...realBarbers, { id: "any", name: "Any barber", work_hours_override: null }];
+  } catch (err) {
+    console.error("[mustafa-cuts] could not read barbers from postgres:", err);
     return undefined;
   }
 }
@@ -127,18 +187,17 @@ async function writeBarbersToRedis(barbers: Barber[]): Promise<void> {
 }
 
 /**
- * Fetch the full services catalog. Reads from Redis when REDIS_URL is set
- * (production) and falls back to the spec-defined defaults otherwise (dev /
- * tests / fresh deploys before E3T2 ships). The defaults are NOT fabricated
- * data — they are the documented services from docs/spec.md, kept here so
- * the bot is functional from the moment the container starts.
+ * Fetch the full services catalog. Priority: Postgres (E3T1+) → Redis
+ * (legacy) → in-code defaults. The defaults are NOT fabricated data —
+ * they are the documented services from docs/spec.md, kept here so the
+ * bot is functional from the moment the container starts (no DB, no
+ * Redis, no seed yet).
  */
 export async function getServices(): Promise<Service[]> {
+  const fromPostgres = await readServicesFromPostgres();
+  if (fromPostgres && fromPostgres.length > 0) return fromPostgres;
   const fromRedis = await readServicesFromRedis();
   if (fromRedis && fromRedis.length > 0) return fromRedis;
-  // Backfill: write the defaults into Redis so the next call (and any
-  // other process) sees the same source of truth. Failures are non-fatal —
-  // the in-process defaults are still returned below.
   if (getRedis()) {
     try {
       await writeServicesToRedis([...DEFAULT_SERVICES]);
@@ -149,18 +208,18 @@ export async function getServices(): Promise<Service[]> {
   return [...DEFAULT_SERVICES];
 }
 
-/** Look up a single service by id. Returns undefined when not found. */
 export async function getServiceById(id: string): Promise<Service | undefined> {
   const services = await getServices();
   return services.find((s) => s.id === id);
 }
 
 /**
- * Fetch the barbers catalog. Same Redis-or-defaults pattern as
- * `getServices()`. The "any" virtual barber is always included so the
- * client-side "any barber" option resolves to a real id.
+ * Fetch the barbers catalog. Same Postgres → Redis → defaults priority as
+ * `getServices()`. The "any" virtual barber is always included.
  */
 export async function getBarbers(): Promise<Barber[]> {
+  const fromPostgres = await readBarbersFromPostgres();
+  if (fromPostgres && fromPostgres.length > 0) return fromPostgres;
   const fromRedis = await readBarbersFromRedis();
   if (fromRedis && fromRedis.length > 0) return fromRedis;
   if (getRedis()) {
@@ -173,7 +232,6 @@ export async function getBarbers(): Promise<Barber[]> {
   return [...DEFAULT_BARBERS];
 }
 
-/** Look up a single barber by id. Returns undefined when not found. */
 export async function getBarberById(id: string): Promise<Barber | undefined> {
   const barbers = await getBarbers();
   return barbers.find((b) => b.id === id);
@@ -187,15 +245,11 @@ export function formatPrice(service: Service): string {
 }
 
 // Shop hours (E1T4). The spec doesn't pin a value, so the default below is
-// the realistic Brooklyn barbershop window the owner can override later
-// (E3T1 adds a `shop_hours` row the data layer can read instead of this
-// constant). Open at 10:00, close at 19:00 (last appointment must END by
-// 19:00 — the slot generator accounts for service length).
+// the realistic Brooklyn barbershop window the owner can override later.
 export const SHOP_OPEN_MINUTES = 10 * 60;   // 10:00
 export const SHOP_CLOSE_MINUTES = 19 * 60;  // 19:00
 export const SLOT_GRANULARITY_MIN = 15;
 
-/** A 15-minute bookable slot. `start` / `end` are minutes since midnight. */
 export interface TimeSlot {
   /** "HH:MM" — used as the button label and the callback_data value. */
   label: string;
@@ -205,7 +259,6 @@ export interface TimeSlot {
   end: number;
 }
 
-/** Format minutes-since-midnight as "HH:MM" in 24h. */
 export function formatHHMM(minutes: number): string {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
@@ -213,11 +266,11 @@ export function formatHHMM(minutes: number): string {
 }
 
 /**
- * Generate the 15-minute bookable slots for a given date and service.
- * Until E3T1 ships (no Postgres), the slot list is the SHOP_OPEN → SHOP_CLOSE
- * window minus any slot where the service can't finish before close. No
- * appointment / blocked-slot filtering yet — E3T1 swaps the implementation
- * under `getAvailableSlots()` without touching the call sites.
+ * Generate the 15-minute bookable slots for a given service. Until E3T1+
+ * fills in real appointments / blocked slots, the slot list is the
+ * SHOP_OPEN → SHOP_CLOSE window minus any slot where the service can't
+ * finish before close. E3T1 swaps the implementation under
+ * `getAvailableSlots()` to filter against the DB.
  */
 export function getAvailableSlots(service: Service): TimeSlot[] {
   const slots: TimeSlot[] = [];
