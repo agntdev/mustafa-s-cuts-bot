@@ -1,0 +1,105 @@
+[
+  {
+    "name": "E1T6: phone submission shows the confirmation dialog with appointment details",
+    "steps": [
+      { "send": { "text": "/book" }, "expect": [] },
+      { "send": { "callback": "service:haircut" }, "expect": [] },
+      { "send": { "callback": "barber:mustafa" }, "expect": [] },
+      { "send": { "callback": "date:2026-06-19" }, "expect": [] },
+      { "send": { "callback": "time:14:30" }, "expect": [] },
+      { "send": { "text": "Jane Doe" }, "expect": [] },
+      {
+        "send": { "text": "555-123-4567" },
+        "expect": [
+          {
+            "method": "sendMessage",
+            "payload": {
+              "text": "✅ Confirm your booking\n\nService: Haircut (30 min)\nBarber: Mustafa\nDate: 2026-06-19\nTime: 14:30\nName: Jane Doe\nPhone: 555-123-4567\n\nTap confirm to lock it in, reschedule to pick a new time, or cancel.",
+              "reply_markup": {
+                "inline_keyboard": [
+                  [{ "text": "✅ Confirm booking", "callback_data": "confirm:book" }],
+                  [
+                    { "text": "🔄 Reschedule", "callback_data": "confirm:reschedule" },
+                    { "text": "❌ Cancel", "callback_data": "confirm:cancel" }
+                  ]
+                ]
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "E1T6: tapping Confirm acknowledges the booking and clears the session",
+    "steps": [
+      { "send": { "text": "/book" }, "expect": [] },
+      { "send": { "callback": "service:haircut" }, "expect": [] },
+      { "send": { "callback": "barber:mustafa" }, "expect": [] },
+      { "send": { "callback": "date:2026-06-19" }, "expect": [] },
+      { "send": { "callback": "time:14:30" }, "expect": [] },
+      { "send": { "text": "Jane Doe" }, "expect": [] },
+      { "send": { "text": "555-123-4567" }, "expect": [] },
+      {
+        "send": { "callback": "confirm:book" },
+        "expect": [
+          { "method": "answerCallbackQuery", "payload": { "text": "Booking confirmed" } },
+          {
+            "method": "editMessageText",
+            "payload": {
+              "text": "🎉 Booked!\n\nHaircut with Mustafa\n2026-06-19 at 14:30\nName: Jane Doe\nPhone: 555-123-4567\n\nWe'll send a 2-hour reminder before your appointment. Tap /start any time to book again."
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "E1T6: tapping Cancel clears the session without booking",
+    "steps": [
+      { "send": { "text": "/book" }, "expect": [] },
+      { "send": { "callback": "service:haircut" }, "expect": [] },
+      { "send": { "callback": "barber:mustafa" }, "expect": [] },
+      { "send": { "callback": "date:2026-06-19" }, "expect": [] },
+      { "send": { "callback": "time:14:30" }, "expect": [] },
+      { "send": { "text": "Jane Doe" }, "expect": [] },
+      { "send": { "text": "555-123-4567" }, "expect": [] },
+      {
+        "send": { "callback": "confirm:cancel" },
+        "expect": [
+          { "method": "answerCallbackQuery", "payload": { "text": "Booking cancelled" } },
+          {
+            "method": "editMessageText",
+            "payload": {
+              "text": "Booking cancelled. No problem — tap /start any time to book again."
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "E1T6: tapping Reschedule restarts the booking flow at the service picker",
+    "steps": [
+      { "send": { "text": "/book" }, "expect": [] },
+      { "send": { "callback": "service:haircut" }, "expect": [] },
+      { "send": { "callback": "barber:mustafa" }, "expect": [] },
+      { "send": { "callback": "date:2026-06-19" }, "expect": [] },
+      { "send": { "callback": "time:14:30" }, "expect": [] },
+      { "send": { "text": "Jane Doe" }, "expect": [] },
+      { "send": { "text": "555-123-4567" }, "expect": [] },
+      {
+        "send": { "callback": "confirm:reschedule" },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          {
+            "method": "editMessageText",
+            "payload": {
+              "text": "📅 Book an appointment\n\nChoose a service to see the time slots:"
+            }
+          }
+        ]
+      }
+    ]
+  }
+]

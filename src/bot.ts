@@ -307,9 +307,37 @@ export function buildBot(token: string) {
     if (awaiting === "phone") {
       c.session.booking = { ...c.session.booking, clientPhone: text };
       c.session.awaitingInput = null;
-      await ctx.reply(
-        `Thanks! Phone: ${text}.\n\nAll set — the confirmation step is coming next.`,
-      );
+      // E1T6 — show the confirmation dialog right after the phone step so
+      // the user can review + confirm / reschedule / cancel in one tap.
+      const booking = c.session.booking ?? {};
+      const service = booking.serviceId ? await getServiceById(booking.serviceId) : undefined;
+      const barber = booking.barberId ? await getBarberById(booking.barberId) : undefined;
+      if (!service || !barber || !booking.date || !booking.time) {
+        await ctx.reply(
+          "I lost track of the booking. Tap /start to begin again.",
+        );
+        return;
+      }
+      const confirmText =
+        `✅ Confirm your booking\n\n` +
+        `Service: ${service.name} (${service.duration_minutes} min)\n` +
+        `Barber: ${barber.name}\n` +
+        `Date: ${booking.date}\n` +
+        `Time: ${booking.time}\n` +
+        `Name: ${booking.clientName ?? "—"}\n` +
+        `Phone: ${text}\n\n` +
+        `Tap confirm to lock it in, reschedule to pick a new time, or cancel.`;
+      await ctx.reply(confirmText, {
+        reply_markup: {
+          inline_keyboard: [
+            [inlineButton("✅ Confirm booking", "confirm:book")],
+            [
+              inlineButton("🔄 Reschedule", "confirm:reschedule"),
+              inlineButton("❌ Cancel", "confirm:cancel"),
+            ],
+          ],
+        },
+      });
       return;
     }
     return next();
@@ -500,24 +528,64 @@ export function buildBot(token: string) {
     );
   });
 
-  // E1T5 — "Back to time slots" from the name / phone prompt. Clears
-  // awaitingInput and restores the time picker for the currently selected
-  // date + service.
-  bot.callbackQuery(BOOKING_BACK_TIME, async (ctx) => {
+  // E1T5 — "Back to time slots" from the name / phone prompt. The canonical
+  // handler is registered alongside the other booking-flow callbacks below.
+  // (Duplicate removed — see the handler near the end of buildBot.)
+
+  // E1T6 — confirm booking. The booking is held in the session; E3T1+ will
+  // persist it to Postgres. For E1T6 we acknowledge with a confirmation
+  // summary and clear the in-flight booking so the next /start is clean.
+  bot.callbackQuery("confirm:book", async (ctx) => {
     const c = ctx as unknown as BotContext<Session>;
-    c.session.awaitingInput = null;
     const booking = c.session.booking ?? {};
+    c.session.booking = undefined;
+    c.session.awaitingInput = null;
+    await ctx.answerCallbackQuery({ text: "Booking confirmed" });
     const service = booking.serviceId ? await getServiceById(booking.serviceId) : undefined;
-    if (!service) {
-      await ctx.answerCallbackQuery({ text: "Restart booking from /start" });
-      await ctx.editMessageText("I lost track of the booking. Tap /start to begin again.");
-      return;
-    }
-    await ctx.answerCallbackQuery();
-    const slots = getAvailableSlots(service);
-    await ctx.editMessageText(timePickerText(service), {
-      reply_markup: timePickerKeyboard(slots),
+    const barber = booking.barberId ? await getBarberById(booking.barberId) : undefined;
+    await ctx.editMessageText(
+      `🎉 Booked!\n\n` +
+        `${service?.name ?? "Service"} with ${barber?.name ?? "your barber"}\n` +
+        `${booking.date ?? ""} at ${booking.time ?? ""}\n` +
+        `Name: ${booking.clientName ?? "—"}\n` +
+        `Phone: ${booking.clientPhone ?? "—"}\n\n` +
+        `We'll send a 2-hour reminder before your appointment. ` +
+        `Tap /start any time to book again.`,
+      {
+        reply_markup: {
+          inline_keyboard: [[inlineButton("🏠 Main menu", MENU_BACK)]],
+        },
+      },
+    );
+  });
+
+  // E1T6 — reschedule. Clears the in-flight booking and drops the user
+  // back into the service picker to start over.
+  bot.callbackQuery("confirm:reschedule", async (ctx) => {
+    const c = ctx as unknown as BotContext<Session>;
+    c.session.booking = undefined;
+    c.session.awaitingInput = null;
+    await ctx.answerCallbackQuery({ text: "Starting over" });
+    const services = await getServices();
+    await ctx.editMessageText(servicePickerText(), {
+      reply_markup: servicePickerKeyboard(services),
     });
+  });
+
+  // E1T6 — cancel. Clears the session and acknowledges.
+  bot.callbackQuery("confirm:cancel", async (ctx) => {
+    const c = ctx as unknown as BotContext<Session>;
+    c.session.booking = undefined;
+    c.session.awaitingInput = null;
+    await ctx.answerCallbackQuery({ text: "Booking cancelled" });
+    await ctx.editMessageText(
+      "Booking cancelled. No problem — tap /start any time to book again.",
+      {
+        reply_markup: {
+          inline_keyboard: [[inlineButton("🏠 Main menu", MENU_BACK)]],
+        },
+      },
+    );
   });
 
   // E1T4 — "Back to calendar" from the time picker. Restores the date
@@ -533,6 +601,26 @@ export function buildBot(token: string) {
       month: today.getMonth(),
     };
     await editToDatePickerForMonth(ctx, parsed.year, parsed.month, today);
+  });
+
+  // E1T5 — "Back to time slots" from the name / phone prompt. Clears
+  // awaitingInput and restores the time picker for the currently selected
+  // service.
+  bot.callbackQuery(BOOKING_BACK_TIME, async (ctx) => {
+    const c = ctx as unknown as BotContext<Session>;
+    c.session.awaitingInput = null;
+    const booking = c.session.booking ?? {};
+    const service = booking.serviceId ? await getServiceById(booking.serviceId) : undefined;
+    if (!service) {
+      await ctx.answerCallbackQuery({ text: "Restart booking from /start" });
+      await ctx.editMessageText("I lost track of the booking. Tap /start to begin again.");
+      return;
+    }
+    await ctx.answerCallbackQuery();
+    const slots = getAvailableSlots(service);
+    await ctx.editMessageText(timePickerText(service), {
+      reply_markup: timePickerKeyboard(slots),
+    });
   });
 
   return bot;
