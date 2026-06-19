@@ -57,7 +57,7 @@
     ]
   },
   {
-    "name": "E1T1: tapping a service button acknowledges with the service name",
+    "name": "E1T1: tapping a service button acknowledges and transitions to the barber picker (full flow in E1T2)",
     "steps": [
       {
         "send": { "text": "/book" },
@@ -68,7 +68,21 @@
         "expect": [
           {
             "method": "answerCallbackQuery",
-            "payload": { "text": "Haircut selected — booking flow continues next." }
+            "payload": { "text": "Haircut selected" }
+          },
+          {
+            "method": "editMessageText",
+            "payload": {
+              "text": "✂️ Choose a barber",
+              "reply_markup": {
+                "inline_keyboard": [
+                  [{ "text": "Mustafa", "callback_data": "barber:mustafa" }],
+                  [{ "text": "Alex", "callback_data": "barber:alex" }],
+                  [{ "text": "Any barber", "callback_data": "barber:any" }],
+                  [{ "text": "🔙 Back to services", "callback_data": "booking:back_services" }]
+                ]
+              }
+            }
           }
         ]
       }

@@ -1,0 +1,138 @@
+[
+  {
+    "name": "E1T2: tapping a service transitions the message to the barber picker",
+    "steps": [
+      {
+        "send": { "text": "/book" },
+        "expect": []
+      },
+      {
+        "send": { "callback": "service:haircut" },
+        "expect": [
+          { "method": "answerCallbackQuery", "payload": { "text": "Haircut selected" } },
+          {
+            "method": "editMessageText",
+            "payload": {
+              "text": "✂️ Choose a barber",
+              "reply_markup": {
+                "inline_keyboard": [
+                  [{ "text": "Mustafa", "callback_data": "barber:mustafa" }],
+                  [{ "text": "Alex", "callback_data": "barber:alex" }],
+                  [{ "text": "Any barber", "callback_data": "barber:any" }],
+                  [{ "text": "🔙 Back to services", "callback_data": "booking:back_services" }]
+                ]
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "E1T2: tapping a barber acknowledges the choice (date picker is E1T3)",
+    "steps": [
+      {
+        "send": { "text": "/book" },
+        "expect": []
+      },
+      {
+        "send": { "callback": "service:haircut" },
+        "expect": []
+      },
+      {
+        "send": { "callback": "barber:mustafa" },
+        "expect": [
+          {
+            "method": "answerCallbackQuery",
+            "payload": { "text": "Mustafa selected — date picker is up next." }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "E1T2: 'Any barber' is one of the picker options",
+    "steps": [
+      {
+        "send": { "text": "/book" },
+        "expect": []
+      },
+      {
+        "send": { "callback": "service:beard_trim" },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          {
+            "method": "editMessageText",
+            "payload": {
+              "reply_markup": {
+                "inline_keyboard": [
+                  [{ "text": "Mustafa", "callback_data": "barber:mustafa" }],
+                  [{ "text": "Alex", "callback_data": "barber:alex" }],
+                  [{ "text": "Any barber", "callback_data": "barber:any" }],
+                  [{ "text": "🔙 Back to services", "callback_data": "booking:back_services" }]
+                ]
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "E1T2: Back to services returns the message to the service picker",
+    "steps": [
+      {
+        "send": { "text": "/book" },
+        "expect": []
+      },
+      {
+        "send": { "callback": "service:haircut" },
+        "expect": []
+      },
+      {
+        "send": { "callback": "booking:back_services" },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          {
+            "method": "editMessageText",
+            "payload": {
+              "text": "📅 Book an appointment\n\nChoose a service to see the time slots:",
+              "reply_markup": {
+                "inline_keyboard": [
+                  [{ "text": "Haircut — 30 min", "callback_data": "service:haircut" }],
+                  [{ "text": "Beard trim — 15 min", "callback_data": "service:beard_trim" }],
+                  [{ "text": "Haircut + Beard — 45 min", "callback_data": "service:haircut_beard" }],
+                  [{ "text": "Kids cut — 30 min", "callback_data": "service:kids" }],
+                  [{ "text": "Hot towel shave — 40 min", "callback_data": "service:hot_towel" }],
+                  [{ "text": "🔙 Main menu", "callback_data": "menu:back" }]
+                ]
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "E1T2: tapping an unknown barber id gets a polite error",
+    "steps": [
+      {
+        "send": { "text": "/book" },
+        "expect": []
+      },
+      {
+        "send": { "callback": "service:haircut" },
+        "expect": []
+      },
+      {
+        "send": { "callback": "barber:nobody" },
+        "expect": [
+          {
+            "method": "answerCallbackQuery",
+            "payload": { "text": "Unknown barber — pick one from the list." }
+          }
+        ]
+      }
+    ]
+  }
+]

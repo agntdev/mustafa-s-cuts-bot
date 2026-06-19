@@ -17,6 +17,17 @@ export interface Service {
   duration_minutes: number;
 }
 
+export interface Barber {
+  /** Stable id used in callback_data (e.g. "mustafa", "any"). */
+  id: string;
+  /** Display name (e.g. "Mustafa"). */
+  name: string;
+  /** Per-barber work-hour override (ISO weekday → "HH:MM-HH:MM"), or null
+   *  to use the shop's default hours. Reserved for E3T1+ when the owner
+   *  edits availability. */
+  work_hours_override: Record<string, string> | null;
+}
+
 /** Default catalog from docs/spec.md (the spec's stated service durations).
  *  Prices are intentionally null — the owner sets them in the admin flow
  *  (E2T1+). E3T2 will seed the same records into Postgres with real prices. */
@@ -26,6 +37,14 @@ export const DEFAULT_SERVICES: ReadonlyArray<Service> = [
   { id: "haircut_beard",name: "Haircut + Beard",   price_cents: null, duration_minutes: 45 },
   { id: "kids",         name: "Kids cut",          price_cents: null, duration_minutes: 30 },
   { id: "hot_towel",    name: "Hot towel shave",   price_cents: null, duration_minutes: 40 },
+];
+
+/** Default barbers from docs/spec.md. "any" is a virtual id meaning "first
+ *  available barber" — the booking flow resolves it at confirmation time. */
+export const DEFAULT_BARBERS: ReadonlyArray<Barber> = [
+  { id: "mustafa", name: "Mustafa", work_hours_override: null },
+  { id: "alex",    name: "Alex",    work_hours_override: null },
+  { id: "any",     name: "Any barber", work_hours_override: null },
 ];
 
 /**
@@ -38,8 +57,9 @@ interface RedisLike {
   set(key: string, value: string): Promise<unknown>;
 }
 
-/** Single namespace key for the services catalog. */
+/** Single namespace keys for the catalogs. */
 const SERVICES_KEY = "mcuts:services";
+const BARBERS_KEY = "mcuts:barbers";
 
 /** Lazily-loaded ioredis singleton, or undefined when REDIS_URL is unset. */
 let redisClient: RedisLike | undefined;
@@ -86,6 +106,26 @@ async function writeServicesToRedis(services: Service[]): Promise<void> {
   await r.set(SERVICES_KEY, JSON.stringify(services));
 }
 
+async function readBarbersFromRedis(): Promise<Barber[] | undefined> {
+  const r = getRedis();
+  if (!r) return undefined;
+  const raw = await r.get(BARBERS_KEY);
+  if (raw == null) return undefined;
+  try {
+    const parsed = JSON.parse(raw) as Barber[];
+    if (!Array.isArray(parsed)) return undefined;
+    return parsed;
+  } catch {
+    return undefined;
+  }
+}
+
+async function writeBarbersToRedis(barbers: Barber[]): Promise<void> {
+  const r = getRedis();
+  if (!r) return;
+  await r.set(BARBERS_KEY, JSON.stringify(barbers));
+}
+
 /**
  * Fetch the full services catalog. Reads from Redis when REDIS_URL is set
  * (production) and falls back to the spec-defined defaults otherwise (dev /
@@ -113,6 +153,30 @@ export async function getServices(): Promise<Service[]> {
 export async function getServiceById(id: string): Promise<Service | undefined> {
   const services = await getServices();
   return services.find((s) => s.id === id);
+}
+
+/**
+ * Fetch the barbers catalog. Same Redis-or-defaults pattern as
+ * `getServices()`. The "any" virtual barber is always included so the
+ * client-side "any barber" option resolves to a real id.
+ */
+export async function getBarbers(): Promise<Barber[]> {
+  const fromRedis = await readBarbersFromRedis();
+  if (fromRedis && fromRedis.length > 0) return fromRedis;
+  if (getRedis()) {
+    try {
+      await writeBarbersToRedis([...DEFAULT_BARBERS]);
+    } catch (err) {
+      console.error("[mustafa-cuts] could not backfill barbers:", err);
+    }
+  }
+  return [...DEFAULT_BARBERS];
+}
+
+/** Look up a single barber by id. Returns undefined when not found. */
+export async function getBarberById(id: string): Promise<Barber | undefined> {
+  const barbers = await getBarbers();
+  return barbers.find((b) => b.id === id);
 }
 
 /** Human-friendly price line for the service picker UI. */
