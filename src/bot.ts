@@ -1,20 +1,33 @@
-import { createBot } from "./toolkit/index.js";
+import { createBot, type BotContext } from "./toolkit/index.js";
 import { inlineButton, inlineKeyboard } from "./toolkit/ui/keyboard.js";
-import { formatPrice, getServiceById, getServices, type Service } from "./data.js";
+import {
+  formatPrice,
+  getBarberById,
+  getBarbers,
+  getServiceById,
+  getServices,
+  type Barber,
+  type Service,
+} from "./data.js";
 
-// The per-chat session shape (ephemeral conversation state only). Extend as the
-// bot grows. Durable domain data must NOT live here — use the toolkit's
-// persistent storage (see AGENTS.md).
+// Per-chat session shape. The `booking` field carries the in-progress
+// selection through the E1T1→E1T6 flow (service → barber → date → time →
+// client info → confirm). It's deliberately opt-in per field so each step
+// can read what the previous step wrote and ignore the rest.
 export interface Session {
-  // example: step?: "awaiting_amount";
+  booking?: {
+    serviceId?: string;
+    barberId?: string;
+    date?: string;
+    time?: string;
+    clientName?: string;
+    clientPhone?: string;
+  };
 }
 
 // Main-menu callback_data keys. /start surfaces three quick options for the
 // client. T02 wires the routing: each button edits the welcome message in
 // place to that feature's view, and a "back" button returns to the main menu.
-// The full guided booking flow (service selection → barber → date → time →
-// confirm) lives in E1T1+; for now, /book and /services routes guide the user
-// to DM the shop, which always works.
 const MENU_BOOK = "menu:book";
 const MENU_SERVICES = "menu:services";
 const MENU_CONTACT = "menu:contact";
@@ -52,10 +65,11 @@ const HELP_TEXT =
 // only intercept "/foo" and let /start, /help, /book through to their handlers.
 const KNOWN_COMMANDS = new Set(["start", "help", "book", "services"]);
 
-// Callback prefix for service-selection buttons. E1T2+ routes the chosen
-// service id into the barber picker; for now the handler just acknowledges
-// the tap and confirms the selection so the user isn't left hanging.
+// Callback prefixes for the booking flow. E1T1 routes service:<id>; E1T2 adds
+// barber:<id> and booking:back_services.
 const SERVICE_PREFIX = "service:";
+const BARBER_PREFIX = "barber:";
+const BOOKING_BACK_SERVICES = "booking:back_services";
 
 /** Build the service-picker keyboard from the current catalog. */
 function servicePickerKeyboard(services: ReadonlyArray<Service>) {
@@ -72,6 +86,19 @@ function servicePickerText(): string {
   return "📅 Book an appointment\n\nChoose a service to see the time slots:";
 }
 
+/** Build the barber-picker keyboard from the current barbers list. */
+function barberPickerKeyboard(barbers: ReadonlyArray<Barber>) {
+  return inlineKeyboard([
+    ...barbers.map((b) => [inlineButton(b.name, `${BARBER_PREFIX}${b.id}`)]),
+    [inlineButton("🔙 Back to services", BOOKING_BACK_SERVICES)],
+  ]);
+}
+
+/** Barber-picker header text. */
+function barberPickerText(): string {
+  return "✂️ Choose a barber";
+}
+
 /** Render the service picker into the chat. */
 async function showServicePicker(ctx: { reply: (text: string, opts?: object) => Promise<unknown> }) {
   const services = await getServices();
@@ -85,6 +112,16 @@ async function editToServicePicker(ctx: {
   const services = await getServices();
   await ctx.editMessageText(servicePickerText(), {
     reply_markup: servicePickerKeyboard(services),
+  });
+}
+
+/** Edit an existing message in place to the barber picker. */
+async function editToBarberPicker(ctx: {
+  editMessageText: (text: string, opts?: object) => Promise<unknown>;
+}) {
+  const barbers = await getBarbers();
+  await ctx.editMessageText(barberPickerText(), {
+    reply_markup: barberPickerKeyboard(barbers),
   });
 }
 
@@ -157,15 +194,12 @@ export function buildBot(token: string) {
   });
 
   // E1T1 — /book opens the service picker. The catalog is read from the data
-  // layer (Redis in production, spec defaults in dev/tests). E1T2+ will route
-  // the chosen service into barber / date / time pickers.
+  // layer (Redis in production, spec defaults in dev/tests).
   bot.command("book", async (ctx) => {
     await showServicePicker(ctx);
   });
 
-  // Main-menu routing (T02). Each handler clears the loading spinner, then
-  // edits the welcome message in place to that feature's view. A "back" button
-  // restores the welcome. menu:book now reuses the /book picker (E1T1).
+  // Main-menu routing (T02). menu:book reuses the /book picker (E1T1).
   bot.callbackQuery(MENU_BOOK, async (ctx) => {
     await ctx.answerCallbackQuery();
     await editToServicePicker(ctx);
@@ -186,9 +220,10 @@ export function buildBot(token: string) {
     await ctx.editMessageText(WELCOME_TEXT, { reply_markup: mainMenu });
   });
 
-  // E1T1 — service selection callback. The next step (barber picker) is wired
-  // by E1T2; for now we acknowledge the tap with a friendly confirmation so
-  // the loading spinner clears and the user sees their choice was registered.
+  // E1T1 — service selection. Records the choice in the session and
+  // transitions the same message to the barber picker (E1T2). The
+  // session-keyed transition means the date / time pickers (E1T3+)
+  // can read the prior selections without re-asking the user.
   bot.callbackQuery(/^service:/, async (ctx) => {
     const data = ctx.callbackQuery.data ?? "";
     const id = data.slice(SERVICE_PREFIX.length);
@@ -197,13 +232,45 @@ export function buildBot(token: string) {
       await ctx.answerCallbackQuery({ text: "Unknown service — pick one from the list." });
       return;
     }
+    const c = ctx as unknown as BotContext<Session>;
+    c.session.booking = { ...c.session.booking, serviceId: service.id };
+    await ctx.answerCallbackQuery({ text: `${service.name} selected` });
+    await editToBarberPicker(ctx);
+  });
+
+  // E1T2 — barber selection. Records the choice; the next step (date picker,
+  // E1T3) will read it. E1T3 ships its own handler for the "next" transition.
+  bot.callbackQuery(/^barber:/, async (ctx) => {
+    const data = ctx.callbackQuery.data ?? "";
+    const id = data.slice(BARBER_PREFIX.length);
+    const barber = await getBarberById(id);
+    if (!barber) {
+      await ctx.answerCallbackQuery({ text: "Unknown barber — pick one from the list." });
+      return;
+    }
+    const c = ctx as unknown as BotContext<Session>;
+    c.session.booking = { ...c.session.booking, barberId: barber.id };
     await ctx.answerCallbackQuery({
-      text: `${service.name} selected — booking flow continues next.`,
+      text: `${barber.name} selected — date picker is up next.`,
     });
+  });
+
+  // E1T2 — "Back to services" from the barber picker. Restarts the booking
+  // flow at the service step while preserving the session so the previous
+  // selection isn't lost if the user goes forward again.
+  bot.callbackQuery(BOOKING_BACK_SERVICES, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await editToServicePicker(ctx);
   });
 
   return bot;
 }
 
 // Re-export for tests that want to introspect the data layer directly.
-export { formatPrice, getServiceById, getServices } from "./data.js";
+export {
+  formatPrice,
+  getBarberById,
+  getBarbers,
+  getServiceById,
+  getServices,
+} from "./data.js";
