@@ -29,7 +29,7 @@
     ]
   },
   {
-    "name": "E1T2: tapping a barber acknowledges the choice (date picker is E1T3)",
+    "name": "E1T2: tapping a barber acknowledges and transitions to the date picker (E1T3)",
     "steps": [
       {
         "send": { "text": "/book" },
@@ -44,8 +44,9 @@
         "expect": [
           {
             "method": "answerCallbackQuery",
-            "payload": { "text": "Mustafa selected — date picker is up next." }
-          }
+            "payload": { "text": "Mustafa selected" }
+          },
+          { "method": "editMessageText" }
         ]
       }
     ]
