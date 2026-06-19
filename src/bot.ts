@@ -9,6 +9,14 @@ import {
   type Barber,
   type Service,
 } from "./data.js";
+import {
+  availableDaysInMonth,
+  isoDate,
+  monthKey,
+  monthName,
+  parseMonthKey,
+  shortDayLabel,
+} from "./dates.js";
 
 // Per-chat session shape. The `booking` field carries the in-progress
 // selection through the E1T1→E1T6 flow (service → barber → date → time →
@@ -22,6 +30,8 @@ export interface Session {
     time?: string;
     clientName?: string;
     clientPhone?: string;
+    /** The month currently being browsed in the date picker (E1T3). */
+    datePickerMonth?: string;
   };
 }
 
@@ -65,11 +75,13 @@ const HELP_TEXT =
 // only intercept "/foo" and let /start, /help, /book through to their handlers.
 const KNOWN_COMMANDS = new Set(["start", "help", "book", "services"]);
 
-// Callback prefixes for the booking flow. E1T1 routes service:<id>; E1T2 adds
-// barber:<id> and booking:back_services.
+// Callback prefixes for the booking flow.
 const SERVICE_PREFIX = "service:";
 const BARBER_PREFIX = "barber:";
+const DATE_PREFIX = "date:";
+const DATE_NAV_PREFIX = "date_nav:";
 const BOOKING_BACK_SERVICES = "booking:back_services";
+const BOOKING_BACK_BARBER = "booking:back_barber";
 
 /** Build the service-picker keyboard from the current catalog. */
 function servicePickerKeyboard(services: ReadonlyArray<Service>) {
@@ -97,6 +109,69 @@ function barberPickerKeyboard(barbers: ReadonlyArray<Barber>) {
 /** Barber-picker header text. */
 function barberPickerText(): string {
   return "✂️ Choose a barber";
+}
+
+/** Maximum days the user can book ahead (per docs/spec.md). */
+const MAX_LOOKAHEAD_DAYS = 30;
+
+/** True when `monthKey` is within the 30-day lookahead window from `today`. */
+function isMonthInLookahead(monthKeyValue: string, today: Date): boolean {
+  const parsed = parseMonthKey(monthKeyValue);
+  if (!parsed) return false;
+  // First day of the target month vs today + 30 days
+  const target = new Date(parsed.year, parsed.month, 1);
+  const cutoff = new Date(today);
+  cutoff.setDate(cutoff.getDate() + MAX_LOOKAHEAD_DAYS);
+  return target <= cutoff;
+}
+
+/** Build the date-picker keyboard for a given month view. Shows the day's
+ *  number in each button; closed days (Sun/Mon) are omitted from the grid. */
+function datePickerKeyboard(
+  year: number,
+  month: number,
+  today: Date,
+): ReturnType<typeof inlineKeyboard> {
+  const days = availableDaysInMonth(year, month, today);
+  const rows: import("./toolkit/ui/keyboard.js").InlineButton[][] = days.map((d) => [
+    inlineButton(`${d.getDate()}`, `${DATE_PREFIX}${isoDate(d)}`),
+  ]);
+  // Pagination — only show "Next month" if it's within the 30-day lookahead
+  // AND there are days to show in the next month. "Prev month" is omitted
+  // because the user shouldn't book in the past.
+  const navRow: import("./toolkit/ui/keyboard.js").InlineButton[] = [];
+  const currentMonthKey = monthKey(new Date(year, month, 1));
+  const nextMonthDate = new Date(year, month + 1, 1);
+  if (isMonthInLookahead(monthKey(nextMonthDate), today)) {
+    navRow.push(
+      inlineButton("Next month →", `${DATE_NAV_PREFIX}${monthKey(nextMonthDate)}`),
+    );
+  }
+  // Avoid an empty nav row.
+  if (navRow.length > 0) rows.push(navRow);
+  rows.push([inlineButton("🔙 Back to barbers", BOOKING_BACK_BARBER)]);
+  // Reference currentMonthKey so eslint doesn't complain about an unused var
+  // (kept for future "current month" indicator work in E1T3+).
+  void currentMonthKey;
+  return { inline_keyboard: rows };
+}
+
+/** Date-picker header text. */
+function datePickerText(year: number, month: number): string {
+  const sample = new Date(year, month, 1);
+  return `📅 Pick a date — ${monthName(sample)} ${year}\n\nClosed Sun & Mon.`;
+}
+
+/** Edit an existing message in place to the date picker for a given month. */
+function editToDatePickerForMonth(
+  ctx: { editMessageText: (text: string, opts?: object) => Promise<unknown> },
+  year: number,
+  month: number,
+  today: Date,
+) {
+  return ctx.editMessageText(datePickerText(year, month), {
+    reply_markup: datePickerKeyboard(year, month, today),
+  });
 }
 
 /** Render the service picker into the chat. */
@@ -220,10 +295,8 @@ export function buildBot(token: string) {
     await ctx.editMessageText(WELCOME_TEXT, { reply_markup: mainMenu });
   });
 
-  // E1T1 — service selection. Records the choice in the session and
-  // transitions the same message to the barber picker (E1T2). The
-  // session-keyed transition means the date / time pickers (E1T3+)
-  // can read the prior selections without re-asking the user.
+  // E1T1 → E1T2 — service selection. Records the choice in the session and
+  // transitions the same message to the barber picker.
   bot.callbackQuery(/^service:/, async (ctx) => {
     const data = ctx.callbackQuery.data ?? "";
     const id = data.slice(SERVICE_PREFIX.length);
@@ -238,8 +311,10 @@ export function buildBot(token: string) {
     await editToBarberPicker(ctx);
   });
 
-  // E1T2 — barber selection. Records the choice; the next step (date picker,
-  // E1T3) will read it. E1T3 ships its own handler for the "next" transition.
+  // E1T2 → E1T3 — barber selection. Records the choice and transitions to
+  // the date picker (E1T3). The session carries the previous service choice
+  // forward, so the "back" button on the date picker can return to the
+  // barber step with the service still in state.
   bot.callbackQuery(/^barber:/, async (ctx) => {
     const data = ctx.callbackQuery.data ?? "";
     const id = data.slice(BARBER_PREFIX.length);
@@ -250,17 +325,57 @@ export function buildBot(token: string) {
     }
     const c = ctx as unknown as BotContext<Session>;
     c.session.booking = { ...c.session.booking, barberId: barber.id };
-    await ctx.answerCallbackQuery({
-      text: `${barber.name} selected — date picker is up next.`,
-    });
+    await ctx.answerCallbackQuery({ text: `${barber.name} selected` });
+    const today = new Date();
+    const monthKeyValue = monthKey(today);
+    c.session.booking = { ...c.session.booking, datePickerMonth: monthKeyValue };
+    await editToDatePickerForMonth(ctx, today.getFullYear(), today.getMonth(), today);
   });
 
-  // E1T2 — "Back to services" from the barber picker. Restarts the booking
-  // flow at the service step while preserving the session so the previous
-  // selection isn't lost if the user goes forward again.
+  // E1T2 — "Back to services" from the barber picker.
   bot.callbackQuery(BOOKING_BACK_SERVICES, async (ctx) => {
     await ctx.answerCallbackQuery();
     await editToServicePicker(ctx);
+  });
+
+  // E1T3 — "Back to barbers" from the date picker. Preserves the in-flight
+  // booking state so the user doesn't lose their service / barber choices.
+  bot.callbackQuery(BOOKING_BACK_BARBER, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await editToBarberPicker(ctx);
+  });
+
+  // E1T3 — month navigation. The callback data encodes the target month so
+  // the handler is stateless w.r.t. "which month is the user looking at".
+  bot.callbackQuery(/^date_nav:/, async (ctx) => {
+    const data = ctx.callbackQuery.data ?? "";
+    const key = data.slice(DATE_NAV_PREFIX.length);
+    const parsed = parseMonthKey(key);
+    if (!parsed) {
+      await ctx.answerCallbackQuery({ text: "Invalid month — try again." });
+      return;
+    }
+    const c = ctx as unknown as BotContext<Session>;
+    c.session.booking = { ...c.session.booking, datePickerMonth: key };
+    await ctx.answerCallbackQuery();
+    await editToDatePickerForMonth(ctx, parsed.year, parsed.month, new Date());
+  });
+
+  // E1T3 — date selection. Records the chosen date in the session. The
+  // next step (time picker, E1T4) will read it and transition the message.
+  // For E1T3 we acknowledge the choice so the loading spinner clears.
+  bot.callbackQuery(/^date:/, async (ctx) => {
+    const data = ctx.callbackQuery.data ?? "";
+    const iso = data.slice(DATE_PREFIX.length);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+      await ctx.answerCallbackQuery({ text: "Invalid date — try again." });
+      return;
+    }
+    const c = ctx as unknown as BotContext<Session>;
+    c.session.booking = { ...c.session.booking, date: iso };
+    await ctx.answerCallbackQuery({
+      text: `${iso} selected — time picker is up next.`,
+    });
   });
 
   return bot;
@@ -274,3 +389,10 @@ export {
   getServiceById,
   getServices,
 } from "./data.js";
+export {
+  availableDaysInMonth,
+  isoDate,
+  monthKey,
+  parseMonthKey,
+  weekday,
+} from "./dates.js";

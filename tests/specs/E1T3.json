@@ -1,0 +1,89 @@
+[
+  {
+    "name": "E1T3: after barber selection, the message transitions to the date picker",
+    "steps": [
+      { "send": { "text": "/book" }, "expect": [] },
+      { "send": { "callback": "service:haircut" }, "expect": [] },
+      {
+        "send": { "callback": "barber:mustafa" },
+        "expect": [
+          { "method": "answerCallbackQuery", "payload": { "text": "Mustafa selected" } },
+          { "method": "editMessageText" }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "E1T3: date picker's 'Back to barbers' returns to the barber picker",
+    "steps": [
+      { "send": { "text": "/book" }, "expect": [] },
+      { "send": { "callback": "service:haircut" }, "expect": [] },
+      { "send": { "callback": "barber:mustafa" }, "expect": [] },
+      {
+        "send": { "callback": "booking:back_barber" },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          {
+            "method": "editMessageText",
+            "payload": {
+              "text": "✂️ Choose a barber",
+              "reply_markup": {
+                "inline_keyboard": [
+                  [{ "text": "Mustafa", "callback_data": "barber:mustafa" }],
+                  [{ "text": "Alex", "callback_data": "barber:alex" }],
+                  [{ "text": "Any barber", "callback_data": "barber:any" }],
+                  [{ "text": "🔙 Back to services", "callback_data": "booking:back_services" }]
+                ]
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "E1T3: tapping a date acknowledges the choice (time picker is E1T4)",
+    "steps": [
+      { "send": { "text": "/book" }, "expect": [] },
+      { "send": { "callback": "service:haircut" }, "expect": [] },
+      { "send": { "callback": "barber:mustafa" }, "expect": [] },
+      {
+        "send": { "callback": "date:2026-06-19" },
+        "expect": [
+          {
+            "method": "answerCallbackQuery",
+            "payload": { "text": "2026-06-19 selected — time picker is up next." }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "E1T3: tapping a date with a malformed callback gets a polite error",
+    "steps": [
+      { "send": { "text": "/book" }, "expect": [] },
+      { "send": { "callback": "service:haircut" }, "expect": [] },
+      { "send": { "callback": "barber:mustafa" }, "expect": [] },
+      {
+        "send": { "callback": "date:not-a-date" },
+        "expect": [
+          { "method": "answerCallbackQuery", "payload": { "text": "Invalid date — try again." } }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "E1T3: tapping a date_nav callback with a bad month key gets a polite error",
+    "steps": [
+      { "send": { "text": "/book" }, "expect": [] },
+      { "send": { "callback": "service:haircut" }, "expect": [] },
+      { "send": { "callback": "barber:mustafa" }, "expect": [] },
+      {
+        "send": { "callback": "date_nav:bogus" },
+        "expect": [
+          { "method": "answerCallbackQuery", "payload": { "text": "Invalid month — try again." } }
+        ]
+      }
+    ]
+  }
+]
