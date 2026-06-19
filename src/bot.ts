@@ -23,7 +23,8 @@ import {
 // Per-chat session shape. The `booking` field carries the in-progress
 // selection through the E1T1→E1T6 flow (service → barber → date → time →
 // client info → confirm). It's deliberately opt-in per field so each step
-// can read what the previous step wrote and ignore the rest.
+// can read what the previous step wrote and ignore the rest. `awaitingInput`
+// drives the free-text handler (E1T5) to know which field to fill next.
 export interface Session {
   booking?: {
     serviceId?: string;
@@ -35,6 +36,7 @@ export interface Session {
     /** The month currently being browsed in the date picker (E1T3). */
     datePickerMonth?: string;
   };
+  awaitingInput?: "name" | "phone" | null;
 }
 
 // Main-menu callback_data keys. /start surfaces three quick options for the
@@ -86,6 +88,7 @@ const TIME_PREFIX = "time:";
 const BOOKING_BACK_SERVICES = "booking:back_services";
 const BOOKING_BACK_BARBER = "booking:back_barber";
 const BOOKING_BACK_DATE = "booking:back_date";
+const BOOKING_BACK_TIME = "booking:back_time";
 
 /** Build the service-picker keyboard from the current catalog. */
 function servicePickerKeyboard(services: ReadonlyArray<Service>) {
@@ -264,7 +267,8 @@ export function buildBot(token: string) {
   // Unknown-command guard (T03). Runs before the command router: if the message
   // text is a "/command" we don't recognise, reply with a friendly hint and
   // stop the chain so the command router doesn't claim it. Free-text (no leading
-  // slash) falls through and is ignored — the booking flow (E1T1+) handles it.
+  // slash) is routed to the E1T5 booking-input handler when `awaitingInput` is
+  // set, and silently ignored otherwise.
   bot.on("message:text", async (ctx, next) => {
     const text = ctx.message?.text ?? "";
     if (text.startsWith("/")) {
@@ -279,6 +283,36 @@ export function buildBot(token: string) {
       }
     }
     await next();
+  });
+
+  // E1T5 — free-text input handler for the booking flow. When the user is
+  // mid-flow (awaitingInput is "name" or "phone"), the next text message
+  // fills that field and advances. Otherwise the chain continues so
+  // commands / unknown-command guard can still claim it.
+  bot.on("message:text", async (ctx, next) => {
+    const c = ctx as unknown as BotContext<Session>;
+    const awaiting = c.session.awaitingInput;
+    if (!awaiting) return next();
+    const text = (ctx.message?.text ?? "").trim();
+    if (text === "" || text.startsWith("/")) return next();
+    if (awaiting === "name") {
+      c.session.booking = { ...c.session.booking, clientName: text };
+      c.session.awaitingInput = "phone";
+      await ctx.reply(
+        `Got it — ${text}.\n\nNow send your phone number so we can confirm ` +
+          `the booking. (e.g. 555-123-4567)`,
+      );
+      return;
+    }
+    if (awaiting === "phone") {
+      c.session.booking = { ...c.session.booking, clientPhone: text };
+      c.session.awaitingInput = null;
+      await ctx.reply(
+        `Thanks! Phone: ${text}.\n\nAll set — the confirmation step is coming next.`,
+      );
+      return;
+    }
+    return next();
   });
 
   bot.command("start", async (ctx) => {
@@ -412,8 +446,9 @@ export function buildBot(token: string) {
     });
   });
 
-  // E1T4 — time selection. Records the chosen time; the next step (client
-  // info collection, E1T5) will read it.
+  // E1T4 → E1T5 — time selection. Records the chosen time and transitions
+  // the message to the name prompt. E1T5 owns the name + phone collection
+  // and the confirmation step (E1T6) will follow.
   bot.callbackQuery(/^time:/, async (ctx) => {
     const data = ctx.callbackQuery.data ?? "";
     const label = data.slice(TIME_PREFIX.length);
@@ -423,8 +458,65 @@ export function buildBot(token: string) {
     }
     const c = ctx as unknown as BotContext<Session>;
     c.session.booking = { ...c.session.booking, time: label };
-    await ctx.answerCallbackQuery({
-      text: `${label} selected — name & phone are up next.`,
+    c.session.awaitingInput = "name";
+    const tgFirst = ctx.from?.first_name?.trim();
+    const suggestRow: import("./toolkit/ui/keyboard.js").InlineButton[] = [];
+    if (tgFirst) {
+      suggestRow.push(
+        inlineButton(`Use my Telegram name (${tgFirst})`, "name:use_telegram"),
+      );
+    }
+    const keyboard = { inline_keyboard: [...(suggestRow.length ? [suggestRow] : []), [inlineButton("🔙 Back to time slots", BOOKING_BACK_TIME)]] };
+    await ctx.answerCallbackQuery({ text: `${label} selected` });
+    await ctx.editMessageText(
+      `🕐 ${label} — now I just need a couple of details.\n\n` +
+        `What's your name? ${
+          tgFirst ? `(Tap below to use "${tgFirst}", or type a different name.)` : "Type your name."
+        }`,
+      { reply_markup: keyboard },
+    );
+  });
+
+  // E1T5 — "Use my Telegram name" button. Fills the name from
+  // ctx.from.first_name and advances the flow to the phone prompt.
+  bot.callbackQuery("name:use_telegram", async (ctx) => {
+    const tgFirst = ctx.from?.first_name?.trim();
+    if (!tgFirst) {
+      await ctx.answerCallbackQuery({ text: "No Telegram name on file — type your name." });
+      return;
+    }
+    const c = ctx as unknown as BotContext<Session>;
+    c.session.booking = { ...c.session.booking, clientName: tgFirst };
+    c.session.awaitingInput = "phone";
+    await ctx.answerCallbackQuery({ text: `Using ${tgFirst}` });
+    await ctx.editMessageText(
+      `Got it — ${tgFirst}.\n\nNow send your phone number so we can confirm ` +
+        `the booking. (e.g. 555-123-4567)`,
+      {
+        reply_markup: {
+          inline_keyboard: [[inlineButton("🔙 Back to time slots", BOOKING_BACK_TIME)]],
+        },
+      },
+    );
+  });
+
+  // E1T5 — "Back to time slots" from the name / phone prompt. Clears
+  // awaitingInput and restores the time picker for the currently selected
+  // date + service.
+  bot.callbackQuery(BOOKING_BACK_TIME, async (ctx) => {
+    const c = ctx as unknown as BotContext<Session>;
+    c.session.awaitingInput = null;
+    const booking = c.session.booking ?? {};
+    const service = booking.serviceId ? await getServiceById(booking.serviceId) : undefined;
+    if (!service) {
+      await ctx.answerCallbackQuery({ text: "Restart booking from /start" });
+      await ctx.editMessageText("I lost track of the booking. Tap /start to begin again.");
+      return;
+    }
+    await ctx.answerCallbackQuery();
+    const slots = getAvailableSlots(service);
+    await ctx.editMessageText(timePickerText(service), {
+      reply_markup: timePickerKeyboard(slots),
     });
   });
 

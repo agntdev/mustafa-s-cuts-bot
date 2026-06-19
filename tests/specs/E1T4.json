@@ -31,7 +31,7 @@
     ]
   },
   {
-    "name": "E1T4: tapping a time slot acknowledges the choice (client info is E1T5)",
+    "name": "E1T4: tapping a time slot acknowledges and transitions to the name prompt (E1T5)",
     "steps": [
       { "send": { "text": "/book" }, "expect": [] },
       { "send": { "callback": "service:haircut" }, "expect": [] },
@@ -42,8 +42,9 @@
         "expect": [
           {
             "method": "answerCallbackQuery",
-            "payload": { "text": "14:30 selected — name & phone are up next." }
-          }
+            "payload": { "text": "14:30 selected" }
+          },
+          { "method": "editMessageText" }
         ]
       }
     ]

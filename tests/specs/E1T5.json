@@ -1,0 +1,92 @@
+[
+  {
+    "name": "E1T5: time selection transitions to the name prompt",
+    "steps": [
+      { "send": { "text": "/book" }, "expect": [] },
+      { "send": { "callback": "service:haircut" }, "expect": [] },
+      { "send": { "callback": "barber:mustafa" }, "expect": [] },
+      { "send": { "callback": "date:2026-06-19" }, "expect": [] },
+      {
+        "send": { "callback": "time:14:30" },
+        "expect": [
+          { "method": "answerCallbackQuery", "payload": { "text": "14:30 selected" } },
+          { "method": "editMessageText" }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "E1T5: typing a name advances the flow to the phone prompt",
+    "steps": [
+      { "send": { "text": "/book" }, "expect": [] },
+      { "send": { "callback": "service:haircut" }, "expect": [] },
+      { "send": { "callback": "barber:mustafa" }, "expect": [] },
+      { "send": { "callback": "date:2026-06-19" }, "expect": [] },
+      { "send": { "callback": "time:14:30" }, "expect": [] },
+      {
+        "send": { "text": "Jane Doe" },
+        "expect": [
+          {
+            "method": "sendMessage",
+            "payload": {
+              "text": "Got it — Jane Doe.\n\nNow send your phone number so we can confirm the booking. (e.g. 555-123-4567)"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "E1T5: typing a phone number completes the client-info step (confirm in E1T6)",
+    "steps": [
+      { "send": { "text": "/book" }, "expect": [] },
+      { "send": { "callback": "service:haircut" }, "expect": [] },
+      { "send": { "callback": "barber:mustafa" }, "expect": [] },
+      { "send": { "callback": "date:2026-06-19" }, "expect": [] },
+      { "send": { "callback": "time:14:30" }, "expect": [] },
+      { "send": { "text": "Jane Doe" }, "expect": [] },
+      {
+        "send": { "text": "555-123-4567" },
+        "expect": [
+          {
+            "method": "sendMessage",
+            "payload": {
+              "text": "Thanks! Phone: 555-123-4567.\n\nAll set — the confirmation step is coming next."
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "E1T5: 'Use my Telegram name' button fills the name from Telegram and advances to phone",
+    "steps": [
+      { "send": { "text": "/book" }, "expect": [] },
+      { "send": { "callback": "service:haircut" }, "expect": [] },
+      { "send": { "callback": "barber:mustafa" }, "expect": [] },
+      { "send": { "callback": "date:2026-06-19" }, "expect": [] },
+      { "send": { "callback": "time:14:30" }, "expect": [] },
+      {
+        "send": { "callback": "name:use_telegram" },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          {
+            "method": "editMessageText",
+            "payload": {
+              "text": "Got it — Test.\n\nNow send your phone number so we can confirm the booking. (e.g. 555-123-4567)"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "E1T5: free text is ignored when not awaiting input",
+    "steps": [
+      {
+        "send": { "text": "hello there" },
+        "expect": []
+      }
+    ]
+  }
+]
