@@ -22,7 +22,7 @@
     ]
   },
   {
-    "name": "T02: tapping Book appointment routes to the booking prompt with a back button",
+    "name": "T02: tapping Book appointment routes to the booking flow (full picker lives in E1T1)",
     "steps": [
       {
         "send": { "text": "/start" },
@@ -35,9 +35,14 @@
           {
             "method": "editMessageText",
             "payload": {
-              "text": "📅 Book an appointment\n\nOur services:\n• Haircut — 30 min\n• Beard trim — 15 min\n• Haircut + Beard — 45 min\n• Kids cut — 30 min\n• Hot towel shave — 40 min\n\nDM us with the service you'd like, your preferred barber (Mustafa, Alex, or no preference), and a date/time. We'll confirm in a reply.",
+              "text": "📅 Book an appointment\n\nChoose a service to see the time slots:",
               "reply_markup": {
                 "inline_keyboard": [
+                  [{ "text": "Haircut — 30 min", "callback_data": "service:haircut" }],
+                  [{ "text": "Beard trim — 15 min", "callback_data": "service:beard_trim" }],
+                  [{ "text": "Haircut + Beard — 45 min", "callback_data": "service:haircut_beard" }],
+                  [{ "text": "Kids cut — 30 min", "callback_data": "service:kids" }],
+                  [{ "text": "Hot towel shave — 40 min", "callback_data": "service:hot_towel" }],
                   [{ "text": "🔙 Main menu", "callback_data": "menu:back" }]
                 ]
               }
