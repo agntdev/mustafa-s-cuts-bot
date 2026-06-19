@@ -42,7 +42,7 @@
     ]
   },
   {
-    "name": "E1T3: tapping a date acknowledges the choice (time picker is E1T4)",
+    "name": "E1T3: tapping a date acknowledges and transitions to the time picker (E1T4)",
     "steps": [
       { "send": { "text": "/book" }, "expect": [] },
       { "send": { "callback": "service:haircut" }, "expect": [] },
@@ -52,8 +52,9 @@
         "expect": [
           {
             "method": "answerCallbackQuery",
-            "payload": { "text": "2026-06-19 selected — time picker is up next." }
-          }
+            "payload": { "text": "2026-06-19 selected" }
+          },
+          { "method": "editMessageText" }
         ]
       }
     ]

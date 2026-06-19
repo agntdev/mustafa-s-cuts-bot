@@ -2,12 +2,14 @@ import { createBot, type BotContext } from "./toolkit/index.js";
 import { inlineButton, inlineKeyboard } from "./toolkit/ui/keyboard.js";
 import {
   formatPrice,
+  getAvailableSlots,
   getBarberById,
   getBarbers,
   getServiceById,
   getServices,
   type Barber,
   type Service,
+  type TimeSlot,
 } from "./data.js";
 import {
   availableDaysInMonth,
@@ -80,8 +82,10 @@ const SERVICE_PREFIX = "service:";
 const BARBER_PREFIX = "barber:";
 const DATE_PREFIX = "date:";
 const DATE_NAV_PREFIX = "date_nav:";
+const TIME_PREFIX = "time:";
 const BOOKING_BACK_SERVICES = "booking:back_services";
 const BOOKING_BACK_BARBER = "booking:back_barber";
+const BOOKING_BACK_DATE = "booking:back_date";
 
 /** Build the service-picker keyboard from the current catalog. */
 function servicePickerKeyboard(services: ReadonlyArray<Service>) {
@@ -160,6 +164,23 @@ function datePickerKeyboard(
 function datePickerText(year: number, month: number): string {
   const sample = new Date(year, month, 1);
   return `📅 Pick a date — ${monthName(sample)} ${year}\n\nClosed Sun & Mon.`;
+}
+
+/** Build the time-picker keyboard from a service's available slots. Two
+ *  slots per row keeps the buttons a comfortable width. */
+function timePickerKeyboard(slots: ReadonlyArray<TimeSlot>): ReturnType<typeof inlineKeyboard> {
+  const rows: import("./toolkit/ui/keyboard.js").InlineButton[][] = [];
+  for (let i = 0; i < slots.length; i += 2) {
+    const row = slots.slice(i, i + 2).map((s) => inlineButton(s.label, `${TIME_PREFIX}${s.label}`));
+    rows.push(row);
+  }
+  rows.push([inlineButton("🔙 Back to calendar", BOOKING_BACK_DATE)]);
+  return { inline_keyboard: rows };
+}
+
+/** Time-picker header text. */
+function timePickerText(service: Service): string {
+  return `🕐 Pick a time for ${service.name} (${service.duration_minutes} min)\n\n15-min slots between 10:00 and 19:00.`;
 }
 
 /** Edit an existing message in place to the date picker for a given month. */
@@ -361,9 +382,10 @@ export function buildBot(token: string) {
     await editToDatePickerForMonth(ctx, parsed.year, parsed.month, new Date());
   });
 
-  // E1T3 — date selection. Records the chosen date in the session. The
-  // next step (time picker, E1T4) will read it and transition the message.
-  // For E1T3 we acknowledge the choice so the loading spinner clears.
+  // E1T3 — date selection. Records the chosen date in the session and
+  // transitions the message to the time picker (E1T4). The session
+  // preserves the service / barber so "back to calendar" restores the
+  // date picker with the prior selections intact.
   bot.callbackQuery(/^date:/, async (ctx) => {
     const data = ctx.callbackQuery.data ?? "";
     const iso = data.slice(DATE_PREFIX.length);
@@ -372,10 +394,53 @@ export function buildBot(token: string) {
       return;
     }
     const c = ctx as unknown as BotContext<Session>;
-    c.session.booking = { ...c.session.booking, date: iso };
-    await ctx.answerCallbackQuery({
-      text: `${iso} selected — time picker is up next.`,
+    const booking = { ...c.session.booking, date: iso };
+    c.session.booking = booking;
+    await ctx.answerCallbackQuery({ text: `${iso} selected` });
+    // Resolve the service to size the slots correctly (service duration
+    // drives which slots fit before the 19:00 close).
+    const service = booking.serviceId ? await getServiceById(booking.serviceId) : undefined;
+    if (!service) {
+      await ctx.editMessageText(
+        "I lost track of the service you picked. Tap /start to start over.",
+      );
+      return;
+    }
+    const slots = getAvailableSlots(service);
+    await ctx.editMessageText(timePickerText(service), {
+      reply_markup: timePickerKeyboard(slots),
     });
+  });
+
+  // E1T4 — time selection. Records the chosen time; the next step (client
+  // info collection, E1T5) will read it.
+  bot.callbackQuery(/^time:/, async (ctx) => {
+    const data = ctx.callbackQuery.data ?? "";
+    const label = data.slice(TIME_PREFIX.length);
+    if (!/^\d{2}:\d{2}$/.test(label)) {
+      await ctx.answerCallbackQuery({ text: "Invalid time — try again." });
+      return;
+    }
+    const c = ctx as unknown as BotContext<Session>;
+    c.session.booking = { ...c.session.booking, time: label };
+    await ctx.answerCallbackQuery({
+      text: `${label} selected — name & phone are up next.`,
+    });
+  });
+
+  // E1T4 — "Back to calendar" from the time picker. Restores the date
+  // picker for the month we were last browsing, with the prior service /
+  // barber selections preserved in the session.
+  bot.callbackQuery(BOOKING_BACK_DATE, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const c = ctx as unknown as BotContext<Session>;
+    const today = new Date();
+    const monthKeyValue = c.session.booking?.datePickerMonth ?? monthKey(today);
+    const parsed = parseMonthKey(monthKeyValue) ?? {
+      year: today.getFullYear(),
+      month: today.getMonth(),
+    };
+    await editToDatePickerForMonth(ctx, parsed.year, parsed.month, today);
   });
 
   return bot;
@@ -384,6 +449,7 @@ export function buildBot(token: string) {
 // Re-export for tests that want to introspect the data layer directly.
 export {
   formatPrice,
+  getAvailableSlots,
   getBarberById,
   getBarbers,
   getServiceById,

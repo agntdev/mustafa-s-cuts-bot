@@ -185,3 +185,46 @@ export function formatPrice(service: Service): string {
   const dollars = service.price_cents / 100;
   return `$${dollars.toFixed(2)}`;
 }
+
+// Shop hours (E1T4). The spec doesn't pin a value, so the default below is
+// the realistic Brooklyn barbershop window the owner can override later
+// (E3T1 adds a `shop_hours` row the data layer can read instead of this
+// constant). Open at 10:00, close at 19:00 (last appointment must END by
+// 19:00 — the slot generator accounts for service length).
+export const SHOP_OPEN_MINUTES = 10 * 60;   // 10:00
+export const SHOP_CLOSE_MINUTES = 19 * 60;  // 19:00
+export const SLOT_GRANULARITY_MIN = 15;
+
+/** A 15-minute bookable slot. `start` / `end` are minutes since midnight. */
+export interface TimeSlot {
+  /** "HH:MM" — used as the button label and the callback_data value. */
+  label: string;
+  /** Minutes since midnight (local time). */
+  start: number;
+  /** Minutes since midnight (local time). */
+  end: number;
+}
+
+/** Format minutes-since-midnight as "HH:MM" in 24h. */
+export function formatHHMM(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+/**
+ * Generate the 15-minute bookable slots for a given date and service.
+ * Until E3T1 ships (no Postgres), the slot list is the SHOP_OPEN → SHOP_CLOSE
+ * window minus any slot where the service can't finish before close. No
+ * appointment / blocked-slot filtering yet — E3T1 swaps the implementation
+ * under `getAvailableSlots()` without touching the call sites.
+ */
+export function getAvailableSlots(service: Service): TimeSlot[] {
+  const slots: TimeSlot[] = [];
+  const lastStart = SHOP_CLOSE_MINUTES - service.duration_minutes;
+  for (let start = SHOP_OPEN_MINUTES; start <= lastStart; start += SLOT_GRANULARITY_MIN) {
+    const end = start + service.duration_minutes;
+    slots.push({ label: formatHHMM(start), start, end });
+  }
+  return slots;
+}
