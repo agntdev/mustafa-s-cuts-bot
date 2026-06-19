@@ -583,6 +583,28 @@ export function buildBot(token: string) {
   });
 
   bot.callbackQuery("confirm:cancel", async (ctx) => {
+    // E5T2 — confirm before destructive action. Replaces the immediate
+    // "Booking cancelled" with a Yes/No confirmation so a mis-tap on the
+    // Cancel button doesn't blow away the in-flight booking.
+    await ctx.answerCallbackQuery({ text: "Are you sure?" });
+    await ctx.editMessageText(
+      "Cancel this booking?\n\nYour selections will be cleared and you'll be back at the main menu.",
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              inlineButton("✅ Yes, cancel", "confirm:cancel:yes"),
+              inlineButton("↩️ Keep booking", "confirm:cancel:no"),
+            ],
+          ],
+        },
+      },
+    );
+  });
+
+  // E5T2 — Yes branch of the cancellation confirmation. Clears the
+  // session and shows the friendly "tap /start to book again" message.
+  bot.callbackQuery("confirm:cancel:yes", async (ctx) => {
     const c = ctx as unknown as BotContext<Session>;
     c.session.booking = undefined;
     c.session.awaitingInput = null;
@@ -595,6 +617,42 @@ export function buildBot(token: string) {
         },
       },
     );
+  });
+
+  // E5T2 — No branch of the cancellation confirmation. Restores the
+  // confirmation dialog with confirm / reschedule / cancel buttons so the
+  // user can pick again.
+  bot.callbackQuery("confirm:cancel:no", async (ctx) => {
+    const c = ctx as unknown as BotContext<Session>;
+    const booking = c.session.booking ?? {};
+    const service = booking.serviceId ? await getServiceById(booking.serviceId) : undefined;
+    const barber = booking.barberId ? await getBarberById(booking.barberId) : undefined;
+    if (!service || !barber || !booking.date || !booking.time || !booking.clientName || !booking.clientPhone) {
+      await ctx.answerCallbackQuery({ text: "Booking state lost — start over with /start" });
+      await ctx.editMessageText("I lost track of the booking. Tap /start to begin again.");
+      return;
+    }
+    await ctx.answerCallbackQuery({ text: "Kept your booking" });
+    const confirmText =
+      `✅ Confirm your booking\n\n` +
+      `Service: ${service.name} (${service.duration_minutes} min)\n` +
+      `Barber: ${barber.name}\n` +
+      `Date: ${booking.date}\n` +
+      `Time: ${booking.time}\n` +
+      `Name: ${booking.clientName}\n` +
+      `Phone: ${booking.clientPhone}\n\n` +
+      `Tap confirm to lock it in, reschedule to pick a new time, or cancel.`;
+    await ctx.editMessageText(confirmText, {
+      reply_markup: {
+        inline_keyboard: [
+          [inlineButton("✅ Confirm booking", "confirm:book")],
+          [
+            inlineButton("🔄 Reschedule", "confirm:reschedule"),
+            inlineButton("❌ Cancel", "confirm:cancel"),
+          ],
+        ],
+      },
+    });
   });
 
   // E2T3 — create a 30-minute block starting now. Owner-only.
@@ -631,7 +689,9 @@ export function buildBot(token: string) {
     }
   });
 
-  // E2T3 — remove a block. Owner-only.
+  // E2T3 — remove a block. Owner-only. E5T2 wraps the actual delete in a
+  // Yes/No confirmation so a mis-tap on the trash button doesn't
+  // immediately remove the block.
   bot.callbackQuery(/^delete_block:/, async (ctx) => {
     if (!isOwner(ctx.from?.id)) {
       await ctx.answerCallbackQuery({ text: "Owner-only action." });
@@ -639,6 +699,31 @@ export function buildBot(token: string) {
     }
     const data = ctx.callbackQuery.data ?? "";
     const id = data.slice("delete_block:".length);
+    await ctx.answerCallbackQuery({ text: "Confirm removal?" });
+    await ctx.editMessageText(
+      "Remove this block?\n\nThe barber will be open for bookings in that window again.",
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              inlineButton("✅ Yes, remove", `delete_block:yes:${id}`),
+              inlineButton("↩️ Keep", `delete_block:no:${id}`),
+            ],
+          ],
+        },
+      },
+    );
+  });
+
+  // E5T2 — Yes branch of the block-deletion confirmation. Performs the
+  // actual delete and refreshes the list.
+  bot.callbackQuery(/^delete_block:yes:/, async (ctx) => {
+    if (!isOwner(ctx.from?.id)) {
+      await ctx.answerCallbackQuery({ text: "Owner-only action." });
+      return;
+    }
+    const data = ctx.callbackQuery.data ?? "";
+    const id = data.slice("delete_block:yes:".length);
     try {
       const removed = await deleteBlock(id);
       if (!removed) {
@@ -669,6 +754,35 @@ export function buildBot(token: string) {
       console.error("[mustafa-cuts] block delete failed:", err);
       await ctx.answerCallbackQuery({ text: "Failed to remove block" });
     }
+  });
+
+  // E5T2 — No branch of the block-deletion confirmation. Restores the
+  // blocks list without removing anything.
+  bot.callbackQuery(/^delete_block:no:/, async (ctx) => {
+    if (!isOwner(ctx.from?.id)) {
+      await ctx.answerCallbackQuery({ text: "Owner-only action." });
+      return;
+    }
+    const blocks = await listActiveBlocks();
+    if (blocks.length === 0) {
+      await ctx.answerCallbackQuery({ text: "Kept the block" });
+      await ctx.editMessageText("No active blocks right now. Use /block to add one.");
+      return;
+    }
+    const lines = ["⏸ Active blocks:", ""];
+    const rows: import("./toolkit/ui/keyboard.js").InlineButton[][] = [];
+    for (const b of blocks) {
+      const start = new Date(b.start_datetime);
+      const end = new Date(b.end_datetime);
+      lines.push(
+        `• ${b.barber_id} — ${start.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}` +
+          ` to ${end.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}` +
+          (b.reason ? ` (${b.reason})` : ""),
+      );
+      rows.push([inlineButton(`🗑 Remove ${b.barber_id} block`, `delete_block:${b.id}`)]);
+    }
+    await ctx.answerCallbackQuery({ text: "Kept the block" });
+    await ctx.editMessageText(lines.join("\n"), { reply_markup: { inline_keyboard: rows } });
   });
 
   return bot;
