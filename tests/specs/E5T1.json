@@ -1,0 +1,104 @@
+[
+  {
+    "name": "E5T1: /book service picker uses an inline keyboard with one button per service",
+    "steps": [
+      {
+        "send": { "text": "/book" },
+        "expect": [
+          {
+            "method": "sendMessage",
+            "payload": {
+              "reply_markup": {
+                "inline_keyboard": [
+                  [{ "callback_data": "service:haircut" }],
+                  [{ "callback_data": "service:beard_trim" }],
+                  [{ "callback_data": "service:haircut_beard" }],
+                  [{ "callback_data": "service:kids" }],
+                  [{ "callback_data": "service:hot_towel" }],
+                  [{ "callback_data": "menu:back" }]
+                ]
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "E5T1: tapping a service transitions to the barber picker, also inline",
+    "steps": [
+      { "send": { "text": "/book" }, "expect": [] },
+      {
+        "send": { "callback": "service:haircut" },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          {
+            "method": "editMessageText",
+            "payload": {
+              "reply_markup": {
+                "inline_keyboard": [
+                  [{ "callback_data": "barber:mustafa" }],
+                  [{ "callback_data": "barber:alex" }],
+                  [{ "callback_data": "barber:any" }],
+                  [{ "callback_data": "booking:back_services" }]
+                ]
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "E5T1: tapping a barber transitions to the date picker (date rows + back)",
+    "steps": [
+      { "send": { "text": "/book" }, "expect": [] },
+      { "send": { "callback": "service:haircut" }, "expect": [] },
+      {
+        "send": { "callback": "barber:mustafa" },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          { "method": "editMessageText" }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "E5T1: tapping a date transitions to the time picker, also inline (first row has 2 slots)",
+    "steps": [
+      { "send": { "text": "/book" }, "expect": [] },
+      { "send": { "callback": "service:haircut" }, "expect": [] },
+      { "send": { "callback": "barber:mustafa" }, "expect": [] },
+      {
+        "send": { "callback": "date:2026-06-19" },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          { "method": "editMessageText" }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "E5T1: every selector step uses inline_keyboard (no ForceReply / ReplyKeyboardMarkup)",
+    "steps": [
+      {
+        "send": { "text": "/start" },
+        "expect": [
+          {
+            "method": "sendMessage",
+            "payload": {
+              "text": "Welcome to Mustafa's Cuts 💈\n\nBrooklyn's finest haircuts, beard trims, and shaves.\nWhat would you like to do?",
+              "reply_markup": {
+                "inline_keyboard": [
+                  [{ "text": "📅 Book appointment", "callback_data": "menu:book" }],
+                  [{ "text": "💇 View services", "callback_data": "menu:services" }],
+                  [{ "text": "📞 Contact shop", "callback_data": "menu:contact" }]
+                ]
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+]
