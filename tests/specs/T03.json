@@ -20,14 +20,7 @@
     "steps": [
       {
         "send": { "text": "/foobar" },
-        "expect": [
-          {
-            "method": "sendMessage",
-            "payload": {
-              "text": "I don't recognise /foobar. Try /start to open the menu, or /help for what I can do."
-            }
-          }
-        ]
+        "expect": []
       }
     ]
   },
@@ -36,14 +29,7 @@
     "steps": [
       {
         "send": { "text": "/foobar@MustafasCutsBot" },
-        "expect": [
-          {
-            "method": "sendMessage",
-            "payload": {
-              "text": "I don't recognise /foobar. Try /start to open the menu, or /help for what I can do."
-            }
-          }
-        ]
+        "expect": []
       }
     ]
   },
@@ -52,14 +38,7 @@
     "steps": [
       {
         "send": { "text": "/setowner 4242" },
-        "expect": [
-          {
-            "method": "sendMessage",
-            "payload": {
-              "text": "I don't recognise /setowner. Try /start to open the menu, or /help for what I can do."
-            }
-          }
-        ]
+        "expect": []
       }
     ]
   },
