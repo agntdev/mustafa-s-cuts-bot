@@ -1,0 +1,134 @@
+[
+  {
+    "name": "T02: /start shows the main menu (Book, Services, Contact)",
+    "steps": [
+      {
+        "send": { "text": "/start" },
+        "expect": [
+          {
+            "method": "sendMessage",
+            "payload": {
+              "reply_markup": {
+                "inline_keyboard": [
+                  [{ "text": "📅 Book appointment", "callback_data": "menu:book" }],
+                  [{ "text": "💇 View services", "callback_data": "menu:services" }],
+                  [{ "text": "📞 Contact shop", "callback_data": "menu:contact" }]
+                ]
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "T02: tapping Book appointment routes to the booking prompt with a back button",
+    "steps": [
+      {
+        "send": { "text": "/start" },
+        "expect": []
+      },
+      {
+        "send": { "callback": "menu:book" },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          {
+            "method": "editMessageText",
+            "payload": {
+              "text": "📅 Book an appointment\n\nOur services:\n• Haircut — 30 min\n• Beard trim — 15 min\n• Haircut + Beard — 45 min\n• Kids cut — 30 min\n• Hot towel shave — 40 min\n\nDM us with the service you'd like, your preferred barber (Mustafa, Alex, or no preference), and a date/time. We'll confirm in a reply.",
+              "reply_markup": {
+                "inline_keyboard": [
+                  [{ "text": "🔙 Main menu", "callback_data": "menu:back" }]
+                ]
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "T02: tapping View services routes to the services list with a back button",
+    "steps": [
+      {
+        "send": { "text": "/start" },
+        "expect": []
+      },
+      {
+        "send": { "callback": "menu:services" },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          {
+            "method": "editMessageText",
+            "payload": {
+              "text": "💇 Our services\n\n• Haircut — 30 min\n• Beard trim — 15 min\n• Haircut + Beard — 45 min\n• Kids cut — 30 min\n• Hot towel shave — 40 min\n\nTap Book appointment to schedule.",
+              "reply_markup": {
+                "inline_keyboard": [
+                  [{ "text": "🔙 Main menu", "callback_data": "menu:back" }]
+                ]
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "T02: tapping Contact shop routes to the contact info with a back button",
+    "steps": [
+      {
+        "send": { "text": "/start" },
+        "expect": []
+      },
+      {
+        "send": { "callback": "menu:contact" },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          {
+            "method": "editMessageText",
+            "payload": {
+              "text": "📞 Contact Mustafa's Cuts\n\n📍 Brooklyn, NY\n🕐 Tue–Sat (closed Sun & Mon)\n💬 Message us right here on Telegram\n\nPrefer to book? Tap Book appointment.",
+              "reply_markup": {
+                "inline_keyboard": [
+                  [{ "text": "🔙 Main menu", "callback_data": "menu:back" }]
+                ]
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "T02: tapping Main menu returns to the welcome",
+    "steps": [
+      {
+        "send": { "text": "/start" },
+        "expect": []
+      },
+      {
+        "send": { "callback": "menu:contact" },
+        "expect": []
+      },
+      {
+        "send": { "callback": "menu:back" },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          {
+            "method": "editMessageText",
+            "payload": {
+              "text": "Welcome to Mustafa's Cuts 💈\n\nBrooklyn's finest haircuts, beard trims, and shaves.\nWhat would you like to do?",
+              "reply_markup": {
+                "inline_keyboard": [
+                  [{ "text": "📅 Book appointment", "callback_data": "menu:book" }],
+                  [{ "text": "💇 View services", "callback_data": "menu:services" }],
+                  [{ "text": "📞 Contact shop", "callback_data": "menu:contact" }]
+                ]
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+]
