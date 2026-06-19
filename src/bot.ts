@@ -1,5 +1,6 @@
 import { createBot } from "./toolkit/index.js";
 import { inlineButton, inlineKeyboard } from "./toolkit/ui/keyboard.js";
+import { formatPrice, getServiceById, getServices, type Service } from "./data.js";
 
 // The per-chat session shape (ephemeral conversation state only). Extend as the
 // bot grows. Durable domain data must NOT live here — use the toolkit's
@@ -33,18 +34,6 @@ const SERVICES_TEXT =
   "• Hot towel shave — 40 min\n\n" +
   "Tap Book appointment to schedule.";
 
-const BOOK_TEXT =
-  "📅 Book an appointment\n\n" +
-  "Our services:\n" +
-  "• Haircut — 30 min\n" +
-  "• Beard trim — 15 min\n" +
-  "• Haircut + Beard — 45 min\n" +
-  "• Kids cut — 30 min\n" +
-  "• Hot towel shave — 40 min\n\n" +
-  "DM us with the service you'd like, your preferred barber " +
-  "(Mustafa, Alex, or no preference), and a date/time. " +
-  "We'll confirm in a reply.";
-
 const CONTACT_TEXT =
   "📞 Contact Mustafa's Cuts\n\n" +
   "📍 Brooklyn, NY\n" +
@@ -60,8 +49,44 @@ const HELP_TEXT =
   "Tip: most things are easier from the menu — just tap /start.";
 
 // Commands the bot recognises today. Used by the unknown-command guard so we
-// only intercept "/foo" and let /start, /help through to their handlers.
-const KNOWN_COMMANDS = new Set(["start", "help"]);
+// only intercept "/foo" and let /start, /help, /book through to their handlers.
+const KNOWN_COMMANDS = new Set(["start", "help", "book", "services"]);
+
+// Callback prefix for service-selection buttons. E1T2+ routes the chosen
+// service id into the barber picker; for now the handler just acknowledges
+// the tap and confirms the selection so the user isn't left hanging.
+const SERVICE_PREFIX = "service:";
+
+/** Build the service-picker keyboard from the current catalog. */
+function servicePickerKeyboard(services: ReadonlyArray<Service>) {
+  return inlineKeyboard([
+    ...services.map((s) => [
+      inlineButton(`${s.name} — ${s.duration_minutes} min`, `${SERVICE_PREFIX}${s.id}`),
+    ]),
+    [inlineButton("🔙 Main menu", MENU_BACK)],
+  ]);
+}
+
+/** Service-picker header text. */
+function servicePickerText(): string {
+  return "📅 Book an appointment\n\nChoose a service to see the time slots:";
+}
+
+/** Render the service picker into the chat. */
+async function showServicePicker(ctx: { reply: (text: string, opts?: object) => Promise<unknown> }) {
+  const services = await getServices();
+  await ctx.reply(servicePickerText(), { reply_markup: servicePickerKeyboard(services) });
+}
+
+/** Edit an existing message in place to the service picker. */
+async function editToServicePicker(ctx: {
+  editMessageText: (text: string, opts?: object) => Promise<unknown>;
+}) {
+  const services = await getServices();
+  await ctx.editMessageText(servicePickerText(), {
+    reply_markup: servicePickerKeyboard(services),
+  });
+}
 
 /**
  * buildBot — assembles the bot and registers every handler, but does NOT start
@@ -110,9 +135,6 @@ export function buildBot(token: string) {
   bot.on("message:text", async (ctx, next) => {
     const text = ctx.message?.text ?? "";
     if (text.startsWith("/")) {
-      // Pull the command token: "/foo@Bot args" → "foo". Case-preserved so
-      // "/HELP" still routes to the /help handler (grammY matches case-
-      // sensitively).
       const firstToken = text.split(/\s+/)[0] ?? "";
       const cmd = firstToken.startsWith("/") ? firstToken.slice(1) : firstToken;
       const bare = cmd.split("@")[0] ?? "";
@@ -134,13 +156,19 @@ export function buildBot(token: string) {
     await ctx.reply(HELP_TEXT);
   });
 
+  // E1T1 — /book opens the service picker. The catalog is read from the data
+  // layer (Redis in production, spec defaults in dev/tests). E1T2+ will route
+  // the chosen service into barber / date / time pickers.
+  bot.command("book", async (ctx) => {
+    await showServicePicker(ctx);
+  });
+
   // Main-menu routing (T02). Each handler clears the loading spinner, then
   // edits the welcome message in place to that feature's view. A "back" button
-  // restores the welcome. The actual booking guided dialog (E1T1+) builds on
-  // top of this routing by replacing BOOK_TEXT with a real service picker.
+  // restores the welcome. menu:book now reuses the /book picker (E1T1).
   bot.callbackQuery(MENU_BOOK, async (ctx) => {
     await ctx.answerCallbackQuery();
-    await ctx.editMessageText(BOOK_TEXT, { reply_markup: backButton() });
+    await editToServicePicker(ctx);
   });
 
   bot.callbackQuery(MENU_SERVICES, async (ctx) => {
@@ -158,5 +186,24 @@ export function buildBot(token: string) {
     await ctx.editMessageText(WELCOME_TEXT, { reply_markup: mainMenu });
   });
 
+  // E1T1 — service selection callback. The next step (barber picker) is wired
+  // by E1T2; for now we acknowledge the tap with a friendly confirmation so
+  // the loading spinner clears and the user sees their choice was registered.
+  bot.callbackQuery(/^service:/, async (ctx) => {
+    const data = ctx.callbackQuery.data ?? "";
+    const id = data.slice(SERVICE_PREFIX.length);
+    const service = await getServiceById(id);
+    if (!service) {
+      await ctx.answerCallbackQuery({ text: "Unknown service — pick one from the list." });
+      return;
+    }
+    await ctx.answerCallbackQuery({
+      text: `${service.name} selected — booking flow continues next.`,
+    });
+  });
+
   return bot;
 }
+
+// Re-export for tests that want to introspect the data layer directly.
+export { formatPrice, getServiceById, getServices } from "./data.js";

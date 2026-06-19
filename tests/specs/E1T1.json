@@ -1,0 +1,95 @@
+[
+  {
+    "name": "E1T1: /book shows the service picker from the catalog",
+    "steps": [
+      {
+        "send": { "text": "/book" },
+        "expect": [
+          {
+            "method": "sendMessage",
+            "payload": {
+              "text": "📅 Book an appointment\n\nChoose a service to see the time slots:",
+              "reply_markup": {
+                "inline_keyboard": [
+                  [{ "text": "Haircut — 30 min", "callback_data": "service:haircut" }],
+                  [{ "text": "Beard trim — 15 min", "callback_data": "service:beard_trim" }],
+                  [{ "text": "Haircut + Beard — 45 min", "callback_data": "service:haircut_beard" }],
+                  [{ "text": "Kids cut — 30 min", "callback_data": "service:kids" }],
+                  [{ "text": "Hot towel shave — 40 min", "callback_data": "service:hot_towel" }],
+                  [{ "text": "🔙 Main menu", "callback_data": "menu:back" }]
+                ]
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "E1T1: the Book menu button edits the welcome to the same service picker",
+    "steps": [
+      {
+        "send": { "text": "/start" },
+        "expect": []
+      },
+      {
+        "send": { "callback": "menu:book" },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          {
+            "method": "editMessageText",
+            "payload": {
+              "text": "📅 Book an appointment\n\nChoose a service to see the time slots:",
+              "reply_markup": {
+                "inline_keyboard": [
+                  [{ "text": "Haircut — 30 min", "callback_data": "service:haircut" }],
+                  [{ "text": "Beard trim — 15 min", "callback_data": "service:beard_trim" }],
+                  [{ "text": "Haircut + Beard — 45 min", "callback_data": "service:haircut_beard" }],
+                  [{ "text": "Kids cut — 30 min", "callback_data": "service:kids" }],
+                  [{ "text": "Hot towel shave — 40 min", "callback_data": "service:hot_towel" }],
+                  [{ "text": "🔙 Main menu", "callback_data": "menu:back" }]
+                ]
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "E1T1: tapping a service button acknowledges with the service name",
+    "steps": [
+      {
+        "send": { "text": "/book" },
+        "expect": []
+      },
+      {
+        "send": { "callback": "service:haircut" },
+        "expect": [
+          {
+            "method": "answerCallbackQuery",
+            "payload": { "text": "Haircut selected — booking flow continues next." }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "E1T1: tapping an unknown service id gets a polite error",
+    "steps": [
+      {
+        "send": { "text": "/book" },
+        "expect": []
+      },
+      {
+        "send": { "callback": "service:not_a_real_service" },
+        "expect": [
+          {
+            "method": "answerCallbackQuery",
+            "payload": { "text": "Unknown service — pick one from the list." }
+          }
+        ]
+      }
+    ]
+  }
+]
