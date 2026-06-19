@@ -1,0 +1,112 @@
+[
+  {
+    "name": "E6T1: end-to-end client booking flow (service → barber → date → time → name → phone → confirm)",
+    "steps": [
+      { "send": { "text": "/book" }, "expect": [] },
+      { "send": { "callback": "service:haircut_beard" }, "expect": [] },
+      { "send": { "callback": "barber:any" }, "expect": [] },
+      { "send": { "callback": "date:2026-06-19" }, "expect": [] },
+      { "send": { "callback": "time:15:00" }, "expect": [] },
+      {
+        "send": { "text": "Alex Smith" },
+        "expect": [
+          {
+            "method": "sendMessage",
+            "payload": {
+              "text": "Got it — Alex Smith.\n\nNow send your phone number so we can confirm the booking. (e.g. 555-123-4567)"
+            }
+          }
+        ]
+      },
+      {
+        "send": { "text": "555-987-6543" },
+        "expect": [
+          {
+            "method": "sendMessage",
+            "payload": {
+              "text": "✅ Confirm your booking\n\nService: Haircut + Beard (45 min)\nBarber: Any barber\nDate: 2026-06-19\nTime: 15:00\nName: Alex Smith\nPhone: 555-987-6543\n\nTap confirm to lock it in, reschedule to pick a new time, or cancel."
+            }
+          }
+        ]
+      },
+      {
+        "send": { "callback": "confirm:book" },
+        "expect": [
+          { "method": "answerCallbackQuery", "payload": { "text": "Booking confirmed" } },
+          {
+            "method": "editMessageText",
+            "payload": {
+              "text": "🎉 Booked!\n\nHaircut + Beard with Any barber\n2026-06-19 at 15:00\nName: Alex Smith\nPhone: 555-987-6543\n\nWe'll send a 2-hour reminder before your appointment. Tap /start any time to book again."
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "E6T1: /start menu navigates to every main flow (Book, Services, Contact)",
+    "steps": [
+      {
+        "send": { "text": "/start" },
+        "expect": [
+          {
+            "method": "sendMessage",
+            "payload": {
+              "reply_markup": {
+                "inline_keyboard": [
+                  [{ "callback_data": "menu:book" }],
+                  [{ "callback_data": "menu:services" }],
+                  [{ "callback_data": "menu:contact" }]
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "send": { "callback": "menu:services" },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          {
+            "method": "editMessageText",
+            "payload": {
+              "text": "💇 Our services\n\n• Haircut — 30 min\n• Beard trim — 15 min\n• Haircut + Beard — 45 min\n• Kids cut — 30 min\n• Hot towel shave — 40 min\n\nTap Book appointment to schedule."
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "E6T1: /help lists every user-facing command",
+    "steps": [
+      {
+        "send": { "text": "/help" },
+        "expect": [
+          {
+            "method": "sendMessage",
+            "payload": {
+              "text": "Mustafa's Cuts — help 💈\n\nHere's what I can do right now:\n/start — Open the main menu (Book, Services, Contact)\n/help  — Show this help message\n\nTip: most things are easier from the menu — just tap /start."
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "E6T1: an unknown command falls through to the friendly hint (not silence)",
+    "steps": [
+      {
+        "send": { "text": "/whatever" },
+        "expect": [
+          {
+            "method": "sendMessage",
+            "payload": {
+              "text": "I don't recognise /whatever. Try /start to open the menu, or /help for what I can do."
+            }
+          }
+        ]
+      }
+    ]
+  }
+]
