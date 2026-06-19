@@ -1,4 +1,5 @@
 import { createBot } from "./toolkit/index.js";
+import { inlineButton, inlineKeyboard } from "./toolkit/ui/keyboard.js";
 
 // The per-chat session shape (ephemeral conversation state only). Extend as the
 // bot grows. Durable domain data must NOT live here — use the toolkit's
@@ -18,8 +19,26 @@ export function buildBot(token: string) {
     initial: () => ({}),
   });
 
+  // Main-menu callback_data keys. /start surfaces three quick options for the
+  // client. T02 wires the actual menu flows (booking, services list, contact)
+  // — this PR only ships the project's entry point.
+  const MENU_BOOK = "menu:book";
+  const MENU_SERVICES = "menu:services";
+  const MENU_CONTACT = "menu:contact";
+
+  const mainMenu = inlineKeyboard([
+    [inlineButton("📅 Book appointment", MENU_BOOK)],
+    [inlineButton("💇 View services", MENU_SERVICES)],
+    [inlineButton("📞 Contact shop", MENU_CONTACT)],
+  ]);
+
   bot.command("start", async (ctx) => {
-    await ctx.reply("Welcome! I am ready to help.");
+    await ctx.reply(
+      "Welcome to Mustafa's Cuts 💈\n\n" +
+        "Brooklyn's finest haircuts, beard trims, and shaves.\n" +
+        "What would you like to do?",
+      { reply_markup: mainMenu },
+    );
   });
 
   return bot;

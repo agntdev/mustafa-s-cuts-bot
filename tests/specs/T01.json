@@ -1,0 +1,25 @@
+[
+  {
+    "name": "T01: /start sends the project's welcome with main-menu buttons",
+    "steps": [
+      {
+        "send": { "text": "/start" },
+        "expect": [
+          {
+            "method": "sendMessage",
+            "payload": {
+              "text": "Welcome to Mustafa's Cuts 💈\n\nBrooklyn's finest haircuts, beard trims, and shaves.\nWhat would you like to do?",
+              "reply_markup": {
+                "inline_keyboard": [
+                  [{ "text": "📅 Book appointment", "callback_data": "menu:book" }],
+                  [{ "text": "💇 View services", "callback_data": "menu:services" }],
+                  [{ "text": "📞 Contact shop", "callback_data": "menu:contact" }]
+                ]
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+]
