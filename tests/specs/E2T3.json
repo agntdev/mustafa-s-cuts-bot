@@ -1,0 +1,45 @@
+[
+  {
+    "name": "E2T3: /block is owner-only — non-owners get a polite refusal",
+    "steps": [
+      {
+        "send": { "text": "/block" },
+        "expect": [
+          {
+            "method": "sendMessage",
+            "payload": {
+              "text": "This command is only available to the shop owner."
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "E2T3: /blocks is owner-only — non-owners get a polite refusal",
+    "steps": [
+      {
+        "send": { "text": "/blocks" },
+        "expect": [
+          {
+            "method": "sendMessage",
+            "payload": {
+              "text": "This command is only available to the shop owner."
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "E2T3: tapping a block callback from a non-owner gets a polite refusal",
+    "steps": [
+      {
+        "send": { "callback": "block:mustafa" },
+        "expect": [
+          { "method": "answerCallbackQuery", "payload": { "text": "Owner-only action." } }
+        ]
+      }
+    ]
+  }
+]
