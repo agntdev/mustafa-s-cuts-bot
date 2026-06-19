@@ -1,0 +1,81 @@
+[
+  {
+    "name": "E1T4: date selection transitions the message to the time picker",
+    "steps": [
+      { "send": { "text": "/book" }, "expect": [] },
+      { "send": { "callback": "service:haircut" }, "expect": [] },
+      { "send": { "callback": "barber:mustafa" }, "expect": [] },
+      {
+        "send": { "callback": "date:2026-06-19" },
+        "expect": [
+          { "method": "answerCallbackQuery", "payload": { "text": "2026-06-19 selected" } },
+          { "method": "editMessageText" }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "E1T4: time picker's 'Back to calendar' returns to the date picker",
+    "steps": [
+      { "send": { "text": "/book" }, "expect": [] },
+      { "send": { "callback": "service:haircut" }, "expect": [] },
+      { "send": { "callback": "barber:mustafa" }, "expect": [] },
+      { "send": { "callback": "date:2026-06-19" }, "expect": [] },
+      {
+        "send": { "callback": "booking:back_date" },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          { "method": "editMessageText" }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "E1T4: tapping a time slot acknowledges the choice (client info is E1T5)",
+    "steps": [
+      { "send": { "text": "/book" }, "expect": [] },
+      { "send": { "callback": "service:haircut" }, "expect": [] },
+      { "send": { "callback": "barber:mustafa" }, "expect": [] },
+      { "send": { "callback": "date:2026-06-19" }, "expect": [] },
+      {
+        "send": { "callback": "time:14:30" },
+        "expect": [
+          {
+            "method": "answerCallbackQuery",
+            "payload": { "text": "14:30 selected — name & phone are up next." }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "E1T4: tapping a time with a malformed callback gets a polite error",
+    "steps": [
+      { "send": { "text": "/book" }, "expect": [] },
+      { "send": { "callback": "service:haircut" }, "expect": [] },
+      { "send": { "callback": "barber:mustafa" }, "expect": [] },
+      { "send": { "callback": "date:2026-06-19" }, "expect": [] },
+      {
+        "send": { "callback": "time:evening" },
+        "expect": [
+          { "method": "answerCallbackQuery", "payload": { "text": "Invalid time — try again." } }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "E1T4: time slots respect the service duration (longer service = fewer slots)",
+    "steps": [
+      { "send": { "text": "/book" }, "expect": [] },
+      { "send": { "callback": "service:haircut_beard" }, "expect": [] },
+      { "send": { "callback": "barber:any" }, "expect": [] },
+      {
+        "send": { "callback": "date:2026-06-19" },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          { "method": "editMessageText" }
+        ]
+      }
+    ]
+  }
+]
