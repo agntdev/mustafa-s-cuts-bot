@@ -52,6 +52,17 @@ const CONTACT_TEXT =
   "💬 Message us right here on Telegram\n\n" +
   "Prefer to book? Tap Book appointment.";
 
+const HELP_TEXT =
+  "Mustafa's Cuts — help 💈\n\n" +
+  "Here's what I can do right now:\n" +
+  "/start — Open the main menu (Book, Services, Contact)\n" +
+  "/help  — Show this help message\n\n" +
+  "Tip: most things are easier from the menu — just tap /start.";
+
+// Commands the bot recognises today. Used by the unknown-command guard so we
+// only intercept "/foo" and let /start, /help through to their handlers.
+const KNOWN_COMMANDS = new Set(["start", "help"]);
+
 /**
  * buildBot — assembles the bot and registers every handler, but does NOT start
  * it. Shared by the runtime entry (src/index.ts) and the Tests-gate harness
@@ -63,6 +74,26 @@ export function buildBot(token: string) {
     initial: () => ({}),
   });
 
+  // Global error boundary (T03): catches any throw from a downstream handler
+  // and replies with a friendly fallback instead of dropping the update. Sits
+  // at the top of the middleware chain so it wraps every command and callback.
+  bot.use(async (ctx, next) => {
+    try {
+      await next();
+    } catch (err) {
+      console.error("[mustafa-cuts] unhandled error:", err);
+      try {
+        await ctx.reply(
+          "Sorry, something went wrong on my end. Please try again, " +
+            "or tap /start to return to the main menu.",
+        );
+      } catch {
+        // The user may have blocked the bot or the chat may be unavailable —
+        // there's nothing more we can do beyond the log above.
+      }
+    }
+  });
+
   const mainMenu = inlineKeyboard([
     [inlineButton("📅 Book appointment", MENU_BOOK)],
     [inlineButton("💇 View services", MENU_SERVICES)],
@@ -72,14 +103,41 @@ export function buildBot(token: string) {
   const backButton = (): ReturnType<typeof inlineKeyboard> =>
     inlineKeyboard([[inlineButton("🔙 Main menu", MENU_BACK)]]);
 
+  // Unknown-command guard (T03). Runs before the command router: if the message
+  // text is a "/command" we don't recognise, reply with a friendly hint and
+  // stop the chain so the command router doesn't claim it. Free-text (no leading
+  // slash) falls through and is ignored — the booking flow (E1T1+) handles it.
+  bot.on("message:text", async (ctx, next) => {
+    const text = ctx.message?.text ?? "";
+    if (text.startsWith("/")) {
+      // Pull the command token: "/foo@Bot args" → "foo". Case-preserved so
+      // "/HELP" still routes to the /help handler (grammY matches case-
+      // sensitively).
+      const firstToken = text.split(/\s+/)[0] ?? "";
+      const cmd = firstToken.startsWith("/") ? firstToken.slice(1) : firstToken;
+      const bare = cmd.split("@")[0] ?? "";
+      if (bare !== "" && !KNOWN_COMMANDS.has(bare)) {
+        await ctx.reply(
+          `I don't recognise /${bare}. Try /start to open the menu, or /help for what I can do.`,
+        );
+        return;
+      }
+    }
+    await next();
+  });
+
   bot.command("start", async (ctx) => {
     await ctx.reply(WELCOME_TEXT, { reply_markup: mainMenu });
   });
 
-  // Main-menu routing. Each handler clears the loading spinner (answerCallbackQuery),
-  // then edits the welcome message in place to that feature's view. A "back" button
-  // restores the welcome. The actual booking guided dialog (E1T1+) builds on top of
-  // this routing by replacing BOOK_TEXT with a real service picker.
+  bot.command("help", async (ctx) => {
+    await ctx.reply(HELP_TEXT);
+  });
+
+  // Main-menu routing (T02). Each handler clears the loading spinner, then
+  // edits the welcome message in place to that feature's view. A "back" button
+  // restores the welcome. The actual booking guided dialog (E1T1+) builds on
+  // top of this routing by replacing BOOK_TEXT with a real service picker.
   bot.callbackQuery(MENU_BOOK, async (ctx) => {
     await ctx.answerCallbackQuery();
     await ctx.editMessageText(BOOK_TEXT, { reply_markup: backButton() });
