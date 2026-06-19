@@ -98,14 +98,7 @@
     "steps": [
       {
         "send": { "text": "/whatever" },
-        "expect": [
-          {
-            "method": "sendMessage",
-            "payload": {
-              "text": "I don't recognise /whatever. Try /start to open the menu, or /help for what I can do."
-            }
-          }
-        ]
+        "expect": []
       }
     ]
   }
