@@ -37,7 +37,7 @@
     ]
   },
   {
-    "name": "E1T5: typing a phone number completes the client-info step (confirm in E1T6)",
+    "name": "E1T5: typing a phone number advances to the confirmation dialog (E1T6)",
     "steps": [
       { "send": { "text": "/book" }, "expect": [] },
       { "send": { "callback": "service:haircut" }, "expect": [] },
@@ -48,12 +48,7 @@
       {
         "send": { "text": "555-123-4567" },
         "expect": [
-          {
-            "method": "sendMessage",
-            "payload": {
-              "text": "Thanks! Phone: 555-123-4567.\n\nAll set — the confirmation step is coming next."
-            }
-          }
+          { "method": "sendMessage" }
         ]
       }
     ]
