@@ -1,0 +1,82 @@
+[
+  {
+    "name": "T03: /help lists the available commands",
+    "steps": [
+      {
+        "send": { "text": "/help" },
+        "expect": [
+          {
+            "method": "sendMessage",
+            "payload": {
+              "text": "Mustafa's Cuts — help 💈\n\nHere's what I can do right now:\n/start — Open the main menu (Book, Services, Contact)\n/help  — Show this help message\n\nTip: most things are easier from the menu — just tap /start."
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "T03: an unknown command gets a friendly hint, not silence",
+    "steps": [
+      {
+        "send": { "text": "/foobar" },
+        "expect": [
+          {
+            "method": "sendMessage",
+            "payload": {
+              "text": "I don't recognise /foobar. Try /start to open the menu, or /help for what I can do."
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "T03: an unknown command with @botname suffix still gets the friendly hint",
+    "steps": [
+      {
+        "send": { "text": "/foobar@MustafasCutsBot" },
+        "expect": [
+          {
+            "method": "sendMessage",
+            "payload": {
+              "text": "I don't recognise /foobar. Try /start to open the menu, or /help for what I can do."
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "T03: an unknown command with trailing args still gets the friendly hint",
+    "steps": [
+      {
+        "send": { "text": "/setowner 4242" },
+        "expect": [
+          {
+            "method": "sendMessage",
+            "payload": {
+              "text": "I don't recognise /setowner. Try /start to open the menu, or /help for what I can do."
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "T03: /start still works when the unknown-command guard is in place",
+    "steps": [
+      {
+        "send": { "text": "/start" },
+        "expect": [
+          {
+            "method": "sendMessage",
+            "payload": {
+              "text": "Welcome to Mustafa's Cuts 💈\n\nBrooklyn's finest haircuts, beard trims, and shaves.\nWhat would you like to do?"
+            }
+          }
+        ]
+      }
+    ]
+  }
+]
