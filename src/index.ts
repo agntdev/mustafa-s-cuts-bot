@@ -2,6 +2,7 @@ import { buildBot } from "./bot.js";
 import { getPool } from "./db.js";
 import { migrate } from "./migrate.js";
 import { seed } from "./seed.js";
+import { startDailySchedule } from "./cron.js";
 
 // Runtime entry (dist/index.js). BOT_TOKEN is injected at runtime as a secret.
 const token = process.env.BOT_TOKEN;
@@ -38,4 +39,18 @@ if (pool) {
 }
 
 const bot = buildBot(token);
+
+// E2T1 — start the daily 08:00 schedule ticker. The owner is identified
+// by OWNER_TELEGRAM_ID (set during initial deployment per docs/spec.md).
+// The ticker is a no-op when the env var is unset so the bot stays
+// bootable in environments without an owner configured.
+const ownerId = process.env.OWNER_TELEGRAM_ID;
+if (ownerId) {
+  const stop = startDailySchedule(bot, ownerId);
+  process.on("SIGTERM", () => { stop(); process.exit(0); });
+  process.on("SIGINT", () => { stop(); process.exit(0); });
+} else {
+  console.log("[mustafa-cuts] OWNER_TELEGRAM_ID not set — daily schedule disabled");
+}
+
 bot.start();
